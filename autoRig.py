@@ -1,8 +1,8 @@
 import pymel.core as pm
 import re
 from maya import OpenMaya
-from autoRigTools import ctrSaveLoadToJson
-from autoRigTools import ARCore
+import ctrSaveLoadToJson
+import ARCore
 reload(ARCore)
 reload(ctrSaveLoadToJson)  # review: reload
 

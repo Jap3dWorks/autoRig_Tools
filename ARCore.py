@@ -1,6 +1,6 @@
 import pymel.core as pm
 from maya import OpenMaya
-from autoRigTools import ctrSaveLoadToJson
+import ctrSaveLoadToJson
 
 import logging
 logging.basicConfig()

@@ -1,7 +1,7 @@
-from autoRigTools import autoRig
-from autoRigTools import ctrSaveLoadToJson
-from autoRigTools import rigTools
-from autoRigTools import ARCore
+import autoRig
+import ctrSaveLoadToJson
+import rigTools
+import ARCore
 
 #### reloads ####
 reload(autoRig)

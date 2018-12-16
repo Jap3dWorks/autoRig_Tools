@@ -1,7 +1,7 @@
 from maya import cmds
 import re
 
-from autoRigTools import autoRig
+import autoRig
 #"D:/_docs/_Animum/Akona/skinCluster/proceso/akona_skin05.ma"
 #'D:/_docs/_Animum/Akona/skinCluster/akona_skin.ma'
 def model_import():
