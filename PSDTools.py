@@ -117,64 +117,59 @@ def getDelta(positive, negative, base):
 
     negBiNorVec = OpenMaya.MVectorArray()
     baseBiNorVec = OpenMaya.MVectorArray()
-    faceIndex = []
+    tangentIndex = []
 
-    # get Tangents
+    # get Tangent component (position of the lower index connected vertex)
     for i in diferenceIndex:
-        floatVector = OpenMaya.MVector()
-        floatBiNormal = OpenMaya.MVector()
-        baseVector = OpenMaya.MVector()
-        baseBiNormal = OpenMaya.MVector()
-
         ptr = util.asIntPtr()
         negativeIt.setIndex(i, ptr)
-        faces = OpenMaya.MIntArray()
-        negativeIt.getConnectedFaces(faces)
-        faceIndex.append(faces[0])
-
-        negativeMFN.getFaceVertexTangent(faces[0], i, floatVector)
-        negativeMFN.getFaceVertexBinormal(faces[0], i, floatBiNormal)
-
-        baseMFN.getFaceVertexTangent(faces[0], i, baseVector)
-        baseMFN.getFaceVertexBinormal(faces[0], i, baseBiNormal)
-
-        negativeTVec.append(floatVector)
-        negBiNorVec.append(floatBiNormal)
-        baseTVec.append(baseVector)
-        baseBiNorVec.append(baseBiNormal)
+        connectedVertex = OpenMaya.MIntArray()
+        negativeIt.getConnectedVertices(connectedVertex)
+        tangentIndex.append(min(connectedVertex))  # lower index vertex
 
     # apply martix transforms
     for n, i in enumerate(diferenceIndex):
         # negative
         normal = OpenMaya.MVector()
-        normal.normalize()
         negativeMFN.getVertexNormal(i, normal)
-        binormal = negBiNorVec[n]
-        binormal.normalize()
-        tangent = negativeTVec[n]
+        vertexPosition = OpenMaya.MPoint()
+        negativeMFN.getPoint(i, vertexPosition, OpenMaya.MSpace.kObject)
+
+        # calculate tangent and binormal, temporal
+        tangent = OpenMaya.MPoint()
+        negativeMFN.getPoint(tangentIndex[n], tangent, OpenMaya.MSpace.kObject)
+        tangent = OpenMaya.MVector(tangent - vertexPosition)
         tangent.normalize()
+        # binormal
+        binormal = normal ^ tangent
+        binormal.normalize()
+        # tangent corrected
+        tangent = binormal ^ normal
+        tangent.normalize()
+        # matrix
         matrixSpaceNegative = [normal.x, normal.y, normal.z, 0, tangent.x, tangent.y, tangent.z, 0, binormal.x,
                                binormal.y, binormal.z, 0, 0, 0, 0, 1]
         matrixNeg = OpenMaya.MMatrix()
         util.createMatrixFromList(matrixSpaceNegative, matrixNeg)
 
-        ###review: testing###
-        # create locator with the matrix
-        vertexPos = cmds.xform('%s.vtx[%s]' % (str(negative.getTransform()), i), ws=True, q=True, t=True)
-        locatorMatrix = [matrixNeg(0,0), matrixNeg(0,1),matrixNeg(0,2),matrixNeg(0,3),matrixNeg(1,0),matrixNeg(1,1),matrixNeg(1,2),matrixNeg(1,3),
-                         matrixNeg(2,0),matrixNeg(2,1),matrixNeg(2,2),matrixNeg(2,3),vertexPos[0],vertexPos[1],vertexPos[2], 0]
-        spaceLocator = cmds.spaceLocator()
-        cmds.xform(spaceLocator, ws=True, m=locatorMatrix)
-        continue
-        ####EndTest####
 
         # base
+        # negative
         normal = OpenMaya.MVector()
-        normal.normalize()
         baseMFN.getVertexNormal(i, normal)
-        binormal = baseBiNorVec[n]
+        vertexPosition = OpenMaya.MPoint()
+        baseMFN.getPoint(i, vertexPosition, OpenMaya.MSpace.kObject)
+
+        # calculate tangent and binormal, temporal
+        tangent = OpenMaya.MPoint()
+        baseMFN.getPoint(tangentIndex[n], tangent, OpenMaya.MSpace.kObject)
+        tangent = OpenMaya.MVector(tangent - vertexPosition)
+        tangent.normalize()
+        # binormal
+        binormal = normal ^ tangent
         binormal.normalize()
-        tangent = baseTVec[n]
+        # tangent corrected
+        tangent = binormal ^ normal
         tangent.normalize()
         matrixSpaceBase = [normal.x, normal.y, normal.z, 0, tangent.x, tangent.y, tangent.z, 0, binormal.x, binormal.y,
                            binormal.z, 0, 0, 0, 0, 1]
@@ -183,6 +178,7 @@ def getDelta(positive, negative, base):
 
         # diferenceVector
         vectorPosed = positive.getPoint(i) - negative.getPoint(i)
+        print vectorPosed
         vectorPosed = OpenMaya.MVector(vectorPosed[0], vectorPosed[1], vectorPosed[2])
 
         vecNegSpace = vectorPosed * matrixNeg.inverse()
@@ -193,7 +189,7 @@ def getDelta(positive, negative, base):
         originalPos = base.getPoint(i, 'object')
         VertexPos = [originalPos[0] + vecBaseSpace.x, originalPos[1] + vecBaseSpace.y, originalPos[2] + vecBaseSpace.z]
         baseDup.setPoint(i, VertexPos, 'object')
-    return
+
     baseDup.getTransform().rename('delta')
     return baseDup
 
