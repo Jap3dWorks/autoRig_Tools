@@ -158,6 +158,16 @@ def getDelta(positive, negative, base):
         matrixNeg = OpenMaya.MMatrix()
         util.createMatrixFromList(matrixSpaceNegative, matrixNeg)
 
+        ###review: testing###
+        # create locator with the matrix
+        vertexPos = cmds.xform('%s.vtx[%s]' % (str(negative.getTransform()), i), ws=True, q=True, t=True)
+        locatorMatrix = [matrixNeg(0,0), matrixNeg(0,1),matrixNeg(0,2),matrixNeg(0,3),matrixNeg(1,0),matrixNeg(1,1),matrixNeg(1,2),matrixNeg(1,3),
+                         matrixNeg(2,0),matrixNeg(2,1),matrixNeg(2,2),matrixNeg(2,3),vertexPos[0],vertexPos[1],vertexPos[2], 0]
+        spaceLocator = cmds.spaceLocator()
+        cmds.xform(spaceLocator, ws=True, m=locatorMatrix)
+        continue
+        ####EndTest####
+
         # base
         normal = OpenMaya.MVector()
         normal.normalize()
@@ -183,7 +193,7 @@ def getDelta(positive, negative, base):
         originalPos = base.getPoint(i, 'object')
         VertexPos = [originalPos[0] + vecBaseSpace.x, originalPos[1] + vecBaseSpace.y, originalPos[2] + vecBaseSpace.z]
         baseDup.setPoint(i, VertexPos, 'object')
-
+    return
     baseDup.getTransform().rename('delta')
     return baseDup
 
