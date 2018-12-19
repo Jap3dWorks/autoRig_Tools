@@ -738,8 +738,6 @@ def stretchCurveVolume(curve, joints, nameInfo, main=None):
         plusMinusAverageToJoint.output1D.connect(joint.scaleY)
         plusMinusAverageToJoint.output1D.connect(joint.scaleZ)
 
-def aimUpVector(driver, driven, axis='y', space='object'):
-    pass
 
 def connectAttributes(driver, driven, attributes, axis):
     """
@@ -753,3 +751,75 @@ def connectAttributes(driver, driven, attributes, axis):
     for attribute in attributes:
         for axi in axis:
             driver.attr('%s%s' % (attribute, axi)).connect(driven.attr('%s%s' % (attribute, axi)))
+
+
+def twistJointBendingBone(parent, mainJointList, twistList, joints, twistSyncJoints, chName, zone, side,  NameIdList):
+    """
+    TODO: make this method?
+    Create necessary connections to use Twist joints like bending joints
+    ARGS:
+        parent(pm.Transform): parent of the system p.e: hipsIk_ctr
+        mainJointList(List): Main joints, general 3 joints
+        mainJointList(list): [[TwsA1, TwsA2,..],[TwsB1, TwsB2,..],...] same len than MainJointList
+        joints(list): skined joints list, no twists p.e: upperLeg, lowerLeg, leg_End
+        twistSyncJoints(List): Twist skinnedJoints, sync  with joints like: [[TwsA1, TwsA2,..],[TwsB1, TwsB2,..],...]
+        chName: nameCharacter
+        zone: zoneOf system
+        NameIdList: names List of the specific parts
+    """
+    pointColor = 7 if side == 'left' else 5
+    # connect to deform skeleton review parent
+    # conenct with twist joints
+    pointControllers = []
+    for i, joint in enumerate(mainJointList):
+        aimPointList = []
+        if len(twistList) > i:  # exclude last twist joint, empty items of a list
+            for j, twistJnt in enumerate(twistList[i]):  # exclude first term review?
+                # leg joint or specific twist
+                skinJoint = joints[i] if j == 0 else twistSyncJoints[i][j - 1]  # skined joints
+
+                nametype = 'main' if j == 0 else 'twist%s' % j
+                # orient and scale
+                aimGrp = pm.group(empty=True, name=str(skinJoint).replace('joint', 'main'))
+                pm.xform(aimGrp, ws=True, m=pm.xform(skinJoint, ws=True, q=True, m=True))
+
+                # connect orient to deform joints
+                pm.orientConstraint(aimGrp, skinJoint, maintainOffset=False)
+
+                twistJnt.scaleY.connect(skinJoint.scaleY)
+                twistJnt.scaleZ.connect(skinJoint.scaleZ)
+
+                aimPointList.append(aimGrp)
+
+                # points two first
+                if (i == 0 and j == 0):  # first joints
+                    parent.addChild(aimGrp)
+
+                elif (i == len(twistList) - 1 and j == len(twistList[i]) - 1):
+                    # last joints
+                    twistJnt.addChild(aimGrp)
+                    pm.aimConstraint(aimGrp, aimPointList[-2], aimVector=(skinJoint.translateX.get(), 0, 0),
+                                     worldUpType='objectrotation', worldUpObject=pointControllers[-1])
+
+
+                elif i > 0 and j == 0:  # first joint not first twist chain
+                    pointController = pointControllers[-1]
+                    pointController.addChild(aimGrp)
+
+                else:
+                    pointController = createController(
+                        '%s_%s_%s_%s_%s_ctr' % (chName, nametype, zone, side, NameIdList[i]), '%sTwistPoint_%s' % (zone, side), 1, pointColor)
+                    pointController, rootPointController, pointConstraint = jointPointToController([twistJnt], pointController)
+                    joint.addChild(rootPointController[0])
+                    pointController = pointController[0]
+                    pointControllers.append(pointController)  # save to list
+                    pointController.addChild(aimGrp)
+                    # aim constraint
+                    if (j == 1):  # second joint, worldup object parent ctr
+                        pm.aimConstraint(aimGrp, aimPointList[-2], aimVector=(skinJoint.translateX.get(), 0, 0),
+                                         worldUpType='objectrotation', worldUpObject=twistList[i][0])
+                    else:
+                        pm.aimConstraint(aimGrp, aimPointList[-2], aimVector=(skinJoint.translateX.get(), 0, 0),
+                                         worldUpType='objectrotation', worldUpObject=pointControllers[-2])
+
+                pm.pointConstraint(aimGrp, skinJoint, maintainOffset=True, name='%s_%s_%s_%s_%s_pointConstraint' % ( chName, nametype, zone, side, NameIdList[i]))

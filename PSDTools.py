@@ -84,7 +84,10 @@ def deltaCorrective(joints, bShape):
 
 def getDelta(positive, negative, base):
     """
-    space matrix
+    Extract a delta from a sculpted position mesh. less precise
+    positive(pm.mesh): posed sculpted mesh
+    negative(pm.mesh): posed mesh
+    base(pm.Mesh): non posed and non sculpted mesh
     """
     diferenceIndex = []
     for i, point in enumerate(positive.getPoints('object')):
@@ -200,9 +203,12 @@ def getDelta(positive, negative, base):
 
 def getDeltaByJointAngle(positive, negative, skinMesh,  joint):
     """
-    only one rotated joint
-    test, i think it is more precise
-    :return:
+    FIXME: problems with the total quaternion rotation. data process seems works fine
+    Extract a delta from a sculpted position mesh, more precise method
+    positive(pm.mesh): posed sculpted mesh
+    negative(pm.mesh): posed mesh TODO, this can be unnecessary
+    skinMesh(pm.mesh): skined mesh, posed like sculpted mesh. be careful with the input nodes, the skin cluster may be accessible
+    joint(pm.Joint): joint rotated for the pose
     """
     diferenceIndex = []
     for i, point in enumerate(positive.getPoints('object')):
@@ -219,8 +225,6 @@ def getDeltaByJointAngle(positive, negative, skinMesh,  joint):
     angle = math.acos(angleQ[3])*2  # angle Radians
     joint.setRotation([0, 0, 0])
     jointZeroR = joint.getRotation(quaternion=True, space='world')
-
-    #angleQ = angleQ * jointZeroR.invertIt()
 
     jointMatrix = pm.xform(joint, q=True, m=True, ws=True)
     jointMatrix = pm.datatypes.MatrixN([jointMatrix[0], jointMatrix[1], jointMatrix[2]],

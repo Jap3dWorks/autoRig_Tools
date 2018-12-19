@@ -572,7 +572,6 @@ class RigAuto(object):
         zoneA = zone
         self.lastZone = zone  # review
         fkColor = 14 if side == 'left' else 29
-        pointColor = 7 if side == 'left' else 5
         # be careful with poseInterpolator
         legJoints = [point for point in pm.ls() if re.match('^%s.*(%s).(?!twist).*%s.*joint$' % (self.chName, zoneA, side), str(point).lower())]
         self.legTwistJoints = [point for point in pm.ls() if re.match('^%s.*(%s).(twist).*%s.*joint$' % (self.chName, zoneA, side), str(point).lower())]
@@ -692,7 +691,7 @@ class RigAuto(object):
         legPoleVectorAuto = ARCore.createRoots([legPoleController])
         ARCore.createRoots([legPoleController])
 
-        # TODO: abstract more
+        # TODO: more abstract
         # poleVectorAttributes
         poleAttrgrp=[]
         legPoleAnimNodes=[]
@@ -725,7 +724,6 @@ class RigAuto(object):
         for i, poleAttr in enumerate(poleAttrgrp):
             legPoleAnimNodes[i].output.connect(polegrpsParentCnstr.attr('%sW%s' % (str(poleAttr), i)))
 
-
         # main blending
         # unknown node to store blend info
         # locator shape instanced version
@@ -754,7 +752,6 @@ class RigAuto(object):
         # iterate along main joints
         # blending
         # todo: visibility, connect to ikFkShape
-        legPointControllers=[]
         for i, joint in enumerate(self.legMainJointList):
             # attributes
             orientConstraint = pm.orientConstraint(self.legIkJointList[i], self.legFkControllersList[i], joint, maintainOffset=False, name='%s_main_blending_%s_%s_orientConstraint' % (self.chName, zoneA, side))
@@ -771,63 +768,13 @@ class RigAuto(object):
             ARCore.lockAndHideAttr(self.legFkControllersList[i], True, False, False)
             pm.setAttr('%s.radi' % self.legFkControllersList[i], channelBox=False, keyable=False)
 
-            # connect to deform skeleton review parent
-            # conenct with twist joints
-            aimPointList=[]
-            if self.legTwistJoints:
-                if len(legTwistList) > i:  # exclude last twist joint, empty items of a list
-                    logger.debug('leg twist list: %s' % legTwistList)
-                    for j, twistJnt in enumerate(legTwistList[i]):  # exclude first term review?
-                        # leg joint or specific twist
-                        skinJoint = legJoints[i] if j == 0 else legTwistSyncJoints[i][j-1]  # skined joints
+        # twist joints bending bones connect, if curve wire detected, no use bendingJoints
+        if legTwistList:
+            ARCore.twistJointBendingBone(parent, self.legMainJointList, legTwistList, legJoints, legTwistSyncJoints, self.chName, zone, side, NameIdList)
 
-                        nametype = 'main' if j == 0 else 'twist%s' % j
-                        # orient and scale
-                        #pm.orientConstraint(twistJnt, skinJoint, maintainOffset=False,name='%s_%s_%s_%s_%s_orientConstraint' % (self.chName, nametype, zoneA, side, NameIdList[i]))
-                        aimGrp = pm.group(empty=True, name=str(skinJoint).replace('joint', 'main'))
-                        pm.xform(aimGrp, ws=True, m=pm.xform(skinJoint, ws=True, q=True, m=True))
-
-                        # connect orient to deform joints
-                        pm.orientConstraint(aimGrp, skinJoint, maintainOffset=False)
-
-                        twistJnt.scaleY.connect(skinJoint.scaleY)
-                        twistJnt.scaleZ.connect(skinJoint.scaleZ)
-
-                        aimPointList.append(aimGrp)
-
-                        # points two first
-                        if (i==0 and j==0):  # first joints
-                            parent.addChild(aimGrp)
-
-                        elif (i == len(legTwistList)-1 and j == len(legTwistList[i])-1):
-                            # last joints
-                            twistJnt.addChild(aimGrp)
-                            pm.aimConstraint(aimGrp, aimPointList[-2], aimVector=(skinJoint.translateX.get(), 0, 0),
-                                             worldUpType='objectrotation', worldUpObject=legPointControllers[-1])
-
-
-                        elif i > 0 and j == 0:  # first joint not first twist chain
-                            pointController = legPointControllers[-1]
-                            pointController.addChild(aimGrp)
-
-                        else:
-                            pointController = self.create_controller('%s_%s_%s_%s_%s_ctr' % (self.chName, nametype, zoneA, side, NameIdList[i]), '%sTwistPoint_%s' % (zoneA, side), 1, pointColor)
-                            pointController, rootPointController, pointConstraint = ARCore.jointPointToController([twistJnt], pointController)
-                            joint.addChild(rootPointController[0])
-                            pointController = pointController[0]
-                            legPointControllers.append(pointController)  # save to list
-                            pointController.addChild(aimGrp)
-                            # aim constraint
-                            if (j==1):  # second joint, worldup object parent ctr
-                                pm.aimConstraint(aimGrp, aimPointList[-2], aimVector=(skinJoint.translateX.get(), 0, 0),
-                                                 worldUpType='objectrotation', worldUpObject=legTwistList[i][0])
-                            else:
-                                pm.aimConstraint(aimGrp, aimPointList[-2], aimVector=(skinJoint.translateX.get(),0,0), worldUpType='objectrotation', worldUpObject=legPointControllers[-2])
-
-                        pm.pointConstraint(aimGrp, skinJoint, maintainOffset=True, name='%s_%s_%s_%s_%s_pointConstraint' % (self.chName, nametype, zoneA, side, NameIdList[i]))
-
-
-            else:
+        # or connect the rig with not twist joints
+        else:
+            for i, joint in enumerate(self.legMainJointList):
                 # connect to deform skeleton
                 joint.rename(str(legJoints[i]).replace('joint', 'main'))  # rename, useful for snap proxy model
                 pm.orientConstraint(joint, legJoints[i], maintainOffset=False, name='%s_main_%s_%s_parentConstraint' % (self.chName, zoneA, side))
@@ -861,7 +808,7 @@ class RigAuto(object):
     def foot_auto(self, side, zones=('leg','foot', 'toe'), planeAlign=None, *funcs):
         """
         # TODO: organize and optimize this Func
-        # TODO: zone or zoneB?
+        # TODO: get zoneA from last ikFk executed func
         auto build a ik fk foot
         Args:
             side: left or right
