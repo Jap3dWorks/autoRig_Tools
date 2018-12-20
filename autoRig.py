@@ -559,7 +559,7 @@ class RigAuto(object):
 
     #TODO: rename method ikFkChain_auto
     #@checker_auto('decorated')
-    def ikFkChain_auto(self, side, parent, zone='leg', stretch=True, *funcs):
+    def ikFkChain_auto(self, side, parent, zone='leg', stretch=True, bendingBones=False, *funcs):
         """
         # TODO: organize and optimize this method
         auto build a ik fk leg
@@ -568,6 +568,7 @@ class RigAuto(object):
             zone: leg or arm
             stretch(bool): if true, create stretch system or hand
             restPoints(list):  with rest points
+            bendingBones(bool): add a control per twist joint
         """
         zoneA = zone
         self.lastZone = zone  # review
@@ -769,8 +770,13 @@ class RigAuto(object):
             pm.setAttr('%s.radi' % self.legFkControllersList[i], channelBox=False, keyable=False)
 
         # twist joints bending bones connect, if curve wire detected, no use bendingJoints
+        # TODO: control by twist or wire?
         if legTwistList:
-            ARCore.twistJointBendingBone(parent, self.legMainJointList, legTwistList, legJoints, legTwistSyncJoints, self.chName, zone, side, NameIdList)
+            # if twist joints, we could desire bending controls or not
+            if bendingBones:
+                ARCore.twistJointBendingBone(parent, self.legMainJointList, legTwistList, legJoints, legTwistSyncJoints, self.chName, zone, side, NameIdList, self.path)
+            else:
+                ARCore.twistJointConnect(self.legMainJointList, legTwistList, legJoints, legTwistSyncJoints)
 
         # or connect the rig with not twist joints
         else:

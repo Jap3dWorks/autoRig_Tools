@@ -100,6 +100,9 @@ def jointPointToController(joints, controller):
         pointConstraintList.append(parentConstraint)
         # lock attr
         lockAndHideAttr(controllerDup, False, False, True)
+        for axis in ('Y', 'Z'):
+            controllerDup.attr('rotate%s' % axis).lock()
+            pm.setAttr('%s.rotate%s' % (str(controllerDup), axis), channelBox=False, keyable=False)
 
     return controllerList, rootList, pointConstraintList
 
@@ -753,9 +756,10 @@ def connectAttributes(driver, driven, attributes, axis):
             driver.attr('%s%s' % (attribute, axi)).connect(driven.attr('%s%s' % (attribute, axi)))
 
 
-def twistJointBendingBone(parent, mainJointList, twistList, joints, twistSyncJoints, chName, zone, side,  NameIdList):
+def twistJointBendingBoneConnect(parent, mainJointList, twistList, joints, twistSyncJoints, chName, zone, side,  NameIdList, path=None):
     """
     TODO: make this method?
+    TODO: controller with a circle, not load controller
     Create necessary connections to use Twist joints like bending joints
     ARGS:
         parent(pm.Transform): parent of the system p.e: hipsIk_ctr
@@ -766,6 +770,7 @@ def twistJointBendingBone(parent, mainJointList, twistList, joints, twistSyncJoi
         chName: nameCharacter
         zone: zoneOf system
         NameIdList: names List of the specific parts
+        path(str): path with character content, like controllers.json
     """
     pointColor = 7 if side == 'left' else 5
     # connect to deform skeleton review parent
@@ -807,8 +812,11 @@ def twistJointBendingBone(parent, mainJointList, twistList, joints, twistSyncJoi
                     pointController.addChild(aimGrp)
 
                 else:
-                    pointController = createController(
-                        '%s_%s_%s_%s_%s_ctr' % (chName, nametype, zone, side, NameIdList[i]), '%sTwistPoint_%s' % (zone, side), 1, pointColor)
+                    if path:
+                        pointController = createController('%s_%s_%s_%s_%s_ctr' % (chName, nametype, zone, side, NameIdList[i]), '%sTwistPoint_%s' % (zone, side), chName, path, 1, pointColor)
+                    else:
+                        pointController = pm.circle(name='%s_%s_%s_%s_%s_ctr' % (chName, nametype, zone, side, NameIdList[i]), r=10)[0]  # if not path, controller is a circle
+
                     pointController, rootPointController, pointConstraint = jointPointToController([twistJnt], pointController)
                     joint.addChild(rootPointController[0])
                     pointController = pointController[0]
@@ -823,3 +831,31 @@ def twistJointBendingBone(parent, mainJointList, twistList, joints, twistSyncJoi
                                          worldUpType='objectrotation', worldUpObject=pointControllers[-2])
 
                 pm.pointConstraint(aimGrp, skinJoint, maintainOffset=True, name='%s_%s_%s_%s_%s_pointConstraint' % ( chName, nametype, zone, side, NameIdList[i]))
+
+
+
+def twistJointConnect(mainJointList, twistList, joints, twistSyncJoints):
+    """
+    Connect control rig twistJoints to skin joints:
+    ARGS:
+        mainJointList(List): Main joints, general 3 joints
+        mainJointList(list): [[TwsA1, TwsA2,..],[TwsB1, TwsB2,..],...] same len than MainJointList
+        joints(list): skined joints list, no twists p.e: upperLeg, lowerLeg, leg_End
+        twistSyncJoints(List): Twist skinnedJoints, sync  with joints like: [[TwsA1, TwsA2,..],[TwsB1, TwsB2,..],...]
+    TODO: make this method?
+
+    """
+    for i, joint in enumerate(mainJointList):
+        if len(twistList) > i:  # exclude last twist joint, empty items of a list
+            for j, twistJnt in enumerate(twistList[i]):  # exclude first term review?
+                # leg joint or specific twist
+                skinJoint = joints[i] if j == 0 else twistSyncJoints[i][j - 1]  # skined joints
+
+                # orient and scale
+                twistJnt.scaleY.connect(skinJoint.scaleY)
+                twistJnt.scaleZ.connect(skinJoint.scaleZ)
+
+                # connect orient and point to deform
+                twistJnt.rename(str(skinJoint).replace('joint', 'main'))
+                pm.orientConstraint(twistJnt, skinJoint, maintainOffset=False)
+                pm.pointConstraint(twistJnt, skinJoint, maintainOffset=False)
