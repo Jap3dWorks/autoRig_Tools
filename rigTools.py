@@ -509,6 +509,66 @@ def getDeltaByJointAngle(positive, negative, skinMesh,  joint):
         baseMeshShape.setPoint(index, sculptVector + jointPos, 'world')
 
 
+def copySkin(skinedMesh, mesh):
+    """
+    Copy skin cluster from a skined mesh
+    """
+    # Checks nodetypes
+    if not isinstance(skinedMesh, pm.nodetypes.Transform):
+        skinedMesh = pm.PyNode(skinedMesh)
+    if not isinstance(mesh, pm.nodetypes.Transform):
+        mesh = pm.PyNode(mesh)
+
+    # get shape
+    skinedMeshShape = skinedMesh.getShape()
+
+    # loop since a skin cluster are found
+    skinCluster = pm.listConnections(skinedMeshShape, d=True, t='skinCluster')[0]
+    skinCluster = pm.PyNode(skinCluster)
+    skinInf = skinCluster.maxInfluences.get()
+
+    # joint list
+    jointList = skinCluster.influenceObjects()
+
+    # create skinCluster
+    copySkinCluster = pm.skinCluster(mesh, jointList, mi=skinInf)
+    print copySkinCluster
+    # copy skin weigths
+    pm.copySkinWeights(ss=skinCluster, ds=copySkinCluster, noMirror=True, surfaceAssociation='closestPoint',
+                       influenceAssociation=('closestJoint', 'closestJoint'))
+
+
+# copySkin('akona_body_mesh', 'akona_cloths_mesh')
+def copyBlendShapes():
+    """
+    disconnect a blend shape, set it to 1 and duplicate the geometry,
+    then, reconnect the attribute
+    """
+    # store connections, and breck connections
+    attr = pm.PyNode("PSDAkona.akona_clavicle_left_joint_0_n60_0")
+    parentAttr = attr.getParent(arrays=True)
+    print parentAttr
+    elements = parentAttr.elements()
+    print elements
+
+    indexBS = attr.index()  # logical index of the blendShape
+    print indexBS
+
+    connection = attr.inputs(p=True)[0]
+    connection.disconnect(attr)
+
+    # set blendShape
+    attr.set(1)
+    # cloneShape
+    bsNode = pm.PyNode(attr.nodeName())
+    meshShape = bsNode.getGeometry()[0]
+    meshShape = pm.PyNode(meshShape)
+    dupmesh = meshShape.getTransform().duplicate()[0]
+
+    # reconnect bs
+    connection.connect(attr)
+
+
 ## Proxies ##
 # TODO: make class
 #UI
