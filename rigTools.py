@@ -2,6 +2,7 @@
 
 from maya import cmds
 from maya import OpenMaya
+from maya import mel
 import re
 import pymel.core as pm
 import math
@@ -509,66 +510,6 @@ def getDeltaByJointAngle(positive, negative, skinMesh,  joint):
         baseMeshShape.setPoint(index, sculptVector + jointPos, 'world')
 
 
-def copySkin(skinedMesh, mesh):
-    """
-    Copy skin cluster from a skined mesh
-    """
-    # Checks nodetypes
-    if not isinstance(skinedMesh, pm.nodetypes.Transform):
-        skinedMesh = pm.PyNode(skinedMesh)
-    if not isinstance(mesh, pm.nodetypes.Transform):
-        mesh = pm.PyNode(mesh)
-
-    # get shape
-    skinedMeshShape = skinedMesh.getShape()
-
-    # loop since a skin cluster are found
-    skinCluster = pm.listConnections(skinedMeshShape, d=True, t='skinCluster')[0]
-    skinCluster = pm.PyNode(skinCluster)
-    skinInf = skinCluster.maxInfluences.get()
-
-    # joint list
-    jointList = skinCluster.influenceObjects()
-
-    # create skinCluster
-    copySkinCluster = pm.skinCluster(mesh, jointList, mi=skinInf)
-    print copySkinCluster
-    # copy skin weigths
-    pm.copySkinWeights(ss=skinCluster, ds=copySkinCluster, noMirror=True, surfaceAssociation='closestPoint',
-                       influenceAssociation=('closestJoint', 'closestJoint'))
-
-
-# copySkin('akona_body_mesh', 'akona_cloths_mesh')
-def copyBlendShapes():
-    """
-    disconnect a blend shape, set it to 1 and duplicate the geometry,
-    then, reconnect the attribute
-    """
-    # store connections, and breck connections
-    attr = pm.PyNode("PSDAkona.akona_clavicle_left_joint_0_n60_0")
-    parentAttr = attr.getParent(arrays=True)
-    print parentAttr
-    elements = parentAttr.elements()
-    print elements
-
-    indexBS = attr.index()  # logical index of the blendShape
-    print indexBS
-
-    connection = attr.inputs(p=True)[0]
-    connection.disconnect(attr)
-
-    # set blendShape
-    attr.set(1)
-    # cloneShape
-    bsNode = pm.PyNode(attr.nodeName())
-    meshShape = bsNode.getGeometry()[0]
-    meshShape = pm.PyNode(meshShape)
-    dupmesh = meshShape.getTransform().duplicate()[0]
-
-    # reconnect bs
-    connection.connect(attr)
-
-
 ## Proxies ##
 # TODO: make class
 #UI
@@ -758,3 +699,123 @@ def ProxyDisconnectConstraints(name, value):
 if __name__ == '__main__':
     proxyShowUI('akona')
 """
+
+class CopyDeforms(object):
+    """
+    class with CopyDeform scripts related
+    """
+    @staticmethod
+    def copySkin(skinedMesh, mesh):
+        """
+        Copy skin cluster from a skined mesh
+        """
+        # Checks nodetypes
+        if not isinstance(skinedMesh, pm.nodetypes.Transform):
+            skinedMesh = pm.PyNode(skinedMesh)
+        if not isinstance(mesh, pm.nodetypes.Transform):
+            mesh = pm.PyNode(mesh)
+
+        # get shape
+        skinedMeshShape = skinedMesh.getShape()
+
+        # loop since a skin cluster are found
+        skinCluster = pm.listConnections(skinedMeshShape, d=True, t='skinCluster')[0]
+        skinCluster = pm.PyNode(skinCluster)
+        skinInf = skinCluster.maxInfluences.get()
+
+        # joint list
+        jointList = skinCluster.influenceObjects()
+
+        # create skinCluster
+        copySkinCluster = pm.skinCluster(mesh, jointList, mi=skinInf)
+        print copySkinCluster
+        # copy skin weigths
+        pm.copySkinWeights(ss=skinCluster, ds=copySkinCluster, noMirror=True, surfaceAssociation='closestPoint',
+                           influenceAssociation=('closestJoint', 'closestJoint'))
+
+    @staticmethod
+    def copyBlendShape(blendShapeAttr, targetMesh):
+        """
+        disconnect a blend shape, connect a mesh with a wrap then clone mesh that mesh
+        Args:
+            blendShapeAttr: blend shape attribute to clone
+            targetMesh: target mesh where apply the wrap modifier
+        """
+        # attribute pymel class
+        if not isinstance(blendShapeAttr, pm.general.Attribute):
+            blendShapeAttr = pm.PyNode(blendShapeAttr)
+
+        # targetMesh pymel class
+        if not isinstance(targetMesh, pm.nodetypes.Transform):
+            targetMesh = pm.PyNode(targetMesh)
+
+        # clone target mesh. easily delete wrap later
+        targetMeshClone = pm.PyNode(targetMesh.duplicate()[0])
+
+        # Get sourceMesh
+        bsNode = pm.PyNode(blendShapeAttr.nodeName())
+        meshShape = bsNode.getGeometry()[0]
+        meshShape = pm.PyNode(meshShape)
+        sourceMesh = meshShape.getTransform()
+
+        # wrap deformer
+        cmds.select([str(targetMeshClone), str(sourceMesh)])
+        wrapDef=mel.eval('doWrapArgList "2" { "1","0","2" }')[0]
+
+        # store connections, and break connections
+        parentAttr = blendShapeAttr.getParent(arrays=True)
+        elements = parentAttr.elements()
+        indexBS = blendShapeAttr.index()  # logical index of the blendShape
+        # fixme
+        connection = blendShapeAttr.inputs(p=True)
+        logger.debug('connections %s: %s' % (blendShapeAttr.getAlias(), connection))
+        connection = connection[0]
+        connection.disconnect(blendShapeAttr)
+
+        # set blendShape
+        blendShapeAttr.set(1)
+
+        # cloneShape
+        BShapeTargetMesh = targetMeshClone.duplicate()[0]
+        # parent world
+        BShapeTargetMesh.setParent(world=True)
+        # delete cloned target mesh
+        pm.delete(targetMeshClone)
+
+        # reconnect bs
+        connection.connect(blendShapeAttr)
+
+        # rename blendShape
+        attrSplitName = blendShapeAttr.getAlias().split('_')[1:]
+        attrSplitName = '_'.join(attrSplitName)
+        print str(blendShapeAttr)
+        targetSplitName = str(BShapeTargetMesh).split('_')[:-1]
+        targetSplitName = '_'.join(targetSplitName)
+        print str(BShapeTargetMesh)
+        # rename
+        newName = '%s_%s' % (targetSplitName, attrSplitName)
+
+        print newName, BShapeTargetMesh
+        BShapeTargetMesh.rename(targetSplitName + attrSplitName)
+
+        return BShapeTargetMesh
+
+    @staticmethod
+    def copyBlendShapes(blendShapeNode, targetMesh):
+        """
+        Copy each target from blendShapeNode into targetMesh, using wrap modifier
+        Args:
+            blendShapeAttr: blend shape attribute to clone
+            targetMesh: target mesh where apply the wrap modifier
+        """
+        # attribute pymel class
+        # check blendshapeNode type
+        if not isinstance(blendShapeNode, pm.nodetypes.BlendShape):
+            blendShapeNode = pm.PyNode(blendShapeNode)
+
+        # get BSWeights attributes
+        BSWeights = len(blendShapeNode.weight.get())
+
+        for i in range(BSWeights-1):
+            if blendShapeNode.weight[i].get():  # fixme
+                CopyDeforms.copyBlendShape(blendShapeNode.weight[i], targetMesh)

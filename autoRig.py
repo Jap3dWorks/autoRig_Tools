@@ -774,7 +774,7 @@ class RigAuto(object):
         if legTwistList:
             # if twist joints, we could desire bending controls or not
             if bendingBones:
-                ARCore.twistJointBendingBone(parent, self.legMainJointList, legTwistList, legJoints, legTwistSyncJoints, self.chName, zone, side, NameIdList, self.path)
+                ARCore.twistJointBendingBoneConnect(parent, self.legMainJointList, legTwistList, legJoints, legTwistSyncJoints, self.chName, zone, side, NameIdList, self.path)
             else:
                 ARCore.twistJointConnect(self.legMainJointList, legTwistList, legJoints, legTwistSyncJoints)
 
