@@ -332,7 +332,6 @@ class RigAuto(object):
         neckHeadJoints = [point for point in pm.ls() if re.match('^%s.*(neck|head).*joint$' % self.chName, str(point))]
         logger.debug('Neck head joints: %s' % neckHeadJoints)
         positions = [point.getTranslation(space='world') for point in neckHeadJoints[:-1]]
-        #  positions.append((positions[-1][0],positions[-1][1]+3,positions[-1][2]))  extra point for head
 
         neckHeadCurveTransform = pm.curve(ep=positions, name='%s_%s_1_crv' % (self.chName, zone))
         # parent to noXform grp

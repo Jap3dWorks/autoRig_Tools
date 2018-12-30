@@ -1,5 +1,7 @@
 import pymel.core as pm
+from maya import cmds
 from maya import OpenMaya
+from maya import OpenMayaAnim
 import ctrSaveLoadToJson
 
 import logging
@@ -503,9 +505,7 @@ def twistJointsConnect(twistMainJoints, trackMain, nameInfo, pointCnstr=None):
         trackMain(pm.Joint): main joint where trackGroup will be oriented constraint
         pointCnstr: object where the twistMainJoints[0] will be pointConstrained, if this arg is given, an extra group is created. to track correctly
         the main joint
-        chName: name of the character
-        zone: leg, arm
-        side: left right
+        nameInfo: characterName_zone_side
     return:
     """
     # if not pointCnstr use main joint
@@ -597,7 +597,7 @@ def snapCurveToPoints(points, curve, iterations=4, precision=0.05):
     """
     Snap curve to points moving CV's of the nurbsCurve
     Args:
-        points(list): points where snap curve
+        points(list): transform where snap curve
         curve(pm.nurbsCurve): curve to snap
         iterations(int): number of passes, higher more precise. default 4
         precision(float): distance between point and curve the script is gonna take as valid. default 0.05
@@ -859,3 +859,165 @@ def twistJointConnect(mainJointList, twistList, joints, twistSyncJoints):
                 twistJnt.rename(str(skinJoint).replace('joint', 'main'))
                 pm.orientConstraint(twistJnt, skinJoint, maintainOffset=False)
                 pm.pointConstraint(twistJnt, skinJoint, maintainOffset=False)
+
+def getSkinedMeshFromJoint(joint):
+    """
+    Find meshes affected by the joint
+    :param joint (pm or str): joint
+    :return (set): Meshes affected by the joint
+    """
+    # create pm objects from list
+    joint = pm.PyNode(joint) if isinstance(joint, str) else joint
+    # find skin clusters
+    skinClusterLst = set(joint.listConnections(type='skinCluster'))
+
+    meshes = []
+    for skin in skinClusterLst:
+        meshes += skin.getGeometry()
+
+    return set(meshes)
+
+def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
+    """
+    Return a list of vertex index inside cilinder defined by a curve
+    :param mesh(str): mesh shape
+    :param curve(str): curve shape
+    :param distance(float):
+    :return: List with vertex indexes
+             List with vertex components
+    """
+    # use the API, Faster for this type of operations
+    mSelection = OpenMaya.MSelectionList()
+    mSelection.add(mesh)
+    mSelection.add(curve)
+
+    # MDagObject to query worldSpace deforms
+    # mesh
+    meshDagPath = OpenMaya.MDagPath()
+    mSelection.getDagPath(0, meshDagPath)
+    meshVertIt = OpenMaya.MItMeshVertex(meshDagPath)  # vertexIterator
+    # curve
+    curveDagPath = OpenMaya.MDagPath()
+    mSelection.getDagPath(1, curveDagPath)
+    curveMFn = OpenMaya.MFnNurbsCurve(curveDagPath)
+
+    # minParam MaxParam adjust to maxValue of the curve
+    maxParam = cmds.getAttr('%s.maxValue' % curve)*maxParam
+    minParam = cmds.getAttr('%s.maxValue' % curve)*minParam + cmds.getAttr('%s.minValue' % curve)
+
+    # mscriptUtil
+    util = OpenMaya.MScriptUtil()
+    vertexIndexes = []  # store vertex indexes
+    vertexComponent = OpenMaya.MObjectArray()  # store vertex MObject
+    while not meshVertIt.isDone():
+        # store vertex position
+        vertexPosition = meshVertIt.position(OpenMaya.MSpace.kWorld)
+        # point on curve
+        ptr = util.asDoublePtr()
+        curveMFn.closestPoint(vertexPosition, ptr, 0.1, OpenMaya.MSpace.kWorld)  # review param (False, ptr)
+        param = util.getDouble(ptr)
+        # param control
+        param = max(minParam, min(maxParam, param))
+
+        # recalculate from param
+        pointCurve = OpenMaya.MPoint()
+        curveMFn.getPointAtParam(param, pointCurve)
+
+        # define vector
+        vertexVector = OpenMaya.MVector(vertexPosition-pointCurve)
+        # check distance from the curve
+        if vertexVector.length() < distance:
+            tangent = curveMFn.tangent(param, OpenMaya.MSpace.kWorld)  # get param tangent
+            # dot product
+            dotProduct = vertexVector*tangent
+            # let some precision interval
+            if not (dotProduct > 0.1 or dotProduct < -0.1):
+                vertexIndexes.append(meshVertIt.index())
+                vertexComponent.append(meshVertIt.currentItem())
+
+        meshVertIt.next()
+
+    return vertexIndexes, vertexComponent
+
+def smoothDeformerWeights(deformer, mesh):
+    """
+    smooth deformer weights
+    :param deformer:
+    :return:
+    """
+    # TODO: too slow, make faster, more faster
+    # use the API, Faster for this type of operations
+    mSelection = OpenMaya.MSelectionList()
+    mSelection.add(deformer)
+    mSelection.add(mesh)
+    # deformer
+    deformerMObject = OpenMaya.MObject()
+    mSelection.getDependNode(0, deformerMObject)
+    # weight mfn
+    weightGeomwtryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
+
+    # mesh
+    meshDagPath = OpenMaya.MDagPath()
+    mSelection.getDagPath(1, meshDagPath)
+    meshVertIt = OpenMaya.MItMeshVertex(meshDagPath)
+    meshMFn = OpenMaya.MFnMesh(meshDagPath)
+
+    while not meshVertIt.isDone():
+        # TODO: pure API
+        index = meshVertIt.index()
+        connectedVertices = OpenMaya.MIntArray()
+        meshVertIt.getConnectedVertices(connectedVertices)
+
+        averageValue = 0
+        for vertex in connectedVertices:
+            averageValue += cmds.percent(deformer, '%s.vtx[%s]' % (mesh, vertex), q=True, v=True)[0]
+
+        averageValue = averageValue/connectedVertices.length()
+        cmds.percent(deformer, '%s.vtx[%s]' % (mesh, index), v=averageValue)
+
+        meshVertIt.next()
+
+
+
+
+def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
+    """
+    Create a curve and wire deformer using joint position as reference
+    :param joints(pm or str): joints
+        mesh(list): list of meshes wire will affect
+    :return: wire deformer and created curve
+    nameInfo: characterName_zone_side
+    """
+    # create pm objects from list
+    joints = [pm.PyNode(joint) if isinstance(joint, str) else joint for joint in joints]
+
+    # get points
+    points = [joint.getTranslation('world') for joint in joints]
+    logger.debug('Wire Deformer curve points: %s' % points)
+
+    # If curve arg is None, create a two point curve
+    if not curve:
+        curve = pm.curve(ep=[points[0], points[-1]], d=2, name=str(nameInfo)+'_wire_curve')
+        # adjust curve points
+        snapCurveToPoints(joints, curve)
+
+    # if not mesh arg, get a random mesh trough the skinCluster
+    if not mesh:
+        mesh = getSkinedMeshFromJoint(joints[0]).pop()
+    else:
+        if isinstance(mesh, pm.nodetypes.Transform):
+            mesh = mesh.getShape()
+
+    # get affected vertex
+    affectedVertex, vertexComponents = vertexIntoCurveCilinder(str(mesh), str(curve.getShape()), 15, .05, .98)
+
+    # create wire deformer
+    wire = pm.wire(mesh, gw=False, w=curve, dds=(0, 40))[0]
+    pm.percent(wire, mesh, v=0)
+    for index in affectedVertex:
+        pm.percent(wire, mesh.vtx[index], v=1)
+
+    # copyDeformerWeights  ->  command for copy, mirror deformer weights
+    # smooth weights
+    for i in range(2):  # review
+        smoothDeformerWeights(str(wire), str(mesh))
