@@ -939,45 +939,53 @@ def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
 
     return vertexIndexes, vertexComponent
 
-def smoothDeformerWeights(deformer, mesh):
+def smoothDeformerWeights(deformer):
     """
-    smooth deformer weights
-    :param deformer:
-    :return:
+    smooth deformer weights.
+    :param deformer(str): Deformer name
     """
-    # TODO: too slow, make faster, more faster
-    # use the API, Faster for this type of operations
     mSelection = OpenMaya.MSelectionList()
     mSelection.add(deformer)
-    mSelection.add(mesh)
     # deformer
     deformerMObject = OpenMaya.MObject()
     mSelection.getDependNode(0, deformerMObject)
+
+    # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
     # weight mfn
-    weightGeomwtryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
+    weightGeometryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
+    membersSelList = OpenMaya.MSelectionList()
+    fnSet = OpenMaya.MFnSet(weightGeometryFilter.deformerSet())  # set components affected
+    fnSet.getMembers(membersSelList, False)  # add to selection list
+    dagPathComponents = OpenMaya.MDagPath()
+    components = OpenMaya.MObject()
+    membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
+
+    # get original weights
+    originalWeight = OpenMaya.MFloatArray()
+    weightGeometryFilter.getWeights(0, components, originalWeight)
 
     # mesh
-    meshDagPath = OpenMaya.MDagPath()
-    mSelection.getDagPath(1, meshDagPath)
-    meshVertIt = OpenMaya.MItMeshVertex(meshDagPath)
-    meshMFn = OpenMaya.MFnMesh(meshDagPath)
+    meshVertIt = OpenMaya.MItMeshVertex(dagPathComponents)
 
+
+    newWeights = OpenMaya.MFloatArray()
+    # calculate new weights
     while not meshVertIt.isDone():
         # TODO: pure API
         index = meshVertIt.index()
         connectedVertices = OpenMaya.MIntArray()
         meshVertIt.getConnectedVertices(connectedVertices)
 
-        averageValue = 0
+        averageValue = originalWeight[index]
         for vertex in connectedVertices:
-            averageValue += cmds.percent(deformer, '%s.vtx[%s]' % (mesh, vertex), q=True, v=True)[0]
+            averageValue += originalWeight[vertex]
 
-        averageValue = averageValue/connectedVertices.length()
-        cmds.percent(deformer, '%s.vtx[%s]' % (mesh, index), v=averageValue)
+        newWeights.append(averageValue/(connectedVertices.length()+1))
 
         meshVertIt.next()
 
-
+    # set new weights
+    weightGeometryFilter.setWeight(dagPathComponents, components, newWeights)
 
 
 def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
@@ -1019,5 +1027,5 @@ def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
 
     # copyDeformerWeights  ->  command for copy, mirror deformer weights
     # smooth weights
-    for i in range(2):  # review
-        smoothDeformerWeights(str(wire), str(mesh))
+    for i in range(4):  # review
+        smoothDeformerWeights(str(wire))
