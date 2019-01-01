@@ -172,7 +172,10 @@ def mirrorControllers():
     return mirroredControllers
 
 """
+import autoRig_Tools
+reload(autoRig_Tools)
 import maya.cmds as cmds
+import pymel.core as pm
 
 def saveControllersSelection():
     selection = cmds.ls(sl=True)
@@ -180,10 +183,21 @@ def saveControllersSelection():
     for sel in selection:
         cmds.select(sel, r=True)
         try:
-            autoRigTools.ctrSaveLoadToJson.ctrSaveJson(sel,'akona', 'D:\_docs\_Animum\Akona')
+            autoRig_Tools.ctrSaveLoadToJson.ctrSaveJson(sel,'akona', 'D:\_docs\_Animum\Akona')
         except:
             pass
         cmds.select(cl=True)
 
 saveControllersSelection()
+
+selection = cmds.ls(sl=True)
+# load controllers
+for ctr in (selection):
+    control, position = autoRig_Tools.ctrSaveLoadToJson.ctrLoadJson(ctr,'akona', 'D:\_docs\_Animum\Akona')
+    control = pm.PyNode(control)
+    pm.xform(control, ws=True, m=position)
+    control.rename(ctr)
+
+
+autoRig_Tools.ctrSaveLoadToJson.mirrorControllers()
 """

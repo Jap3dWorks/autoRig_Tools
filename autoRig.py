@@ -133,7 +133,7 @@ class RigAuto(object):
 
     # TODO: zone var in names
     #@checker_auto('decorated')
-    def spine_auto(self, zone='spine'):
+    def spine_auto(self, zone='spine', *funcs):
         """
             Auto create a character spine
         """
@@ -160,7 +160,7 @@ class RigAuto(object):
 
         # create locators and connect to curve CV's
         spineDrvList = []
-        spineIKControllerList = []
+        self.spineIKControllerList = []
         spineFKControllerList = []
         for n, point in enumerate(spineCurve.getCVs()):
             ctrType = 'hips' if n == 0 else 'chest' if n == spineCurve.numCVs() - 1 else 'spine%s' % n
@@ -179,7 +179,7 @@ class RigAuto(object):
             spineController.setTranslation(point)
 
             spineController.addChild(spineDriver)
-            spineIKControllerList.append(spineController)
+            self.spineIKControllerList.append(spineController)
 
             # spine type controllers only translate, lock unused attr
             if 'spine' in ctrType:
@@ -200,20 +200,20 @@ class RigAuto(object):
 
             # configure ctr hierarchy, valid for 5 ctrllers
             if n == 1:
-                spineIKControllerList[0].addChild(spineController)
-                spineFKControllerList[0].addChild(spineIKControllerList[0])
+                self.spineIKControllerList[0].addChild(spineController)
+                spineFKControllerList[0].addChild(self.spineIKControllerList[0])
             # last iteration
             elif n == (spineCurve.numCVs()-1):
-                spineController.addChild(spineIKControllerList[-2])
+                spineController.addChild(self.spineIKControllerList[-2])
                 spineFKControllerList[-1].addChild(spineController)
 
                 # add 3th ik controller to hierarchy too
-                spineFKControllerList[1].addChild(spineIKControllerList[2])
+                spineFKControllerList[1].addChild(self.spineIKControllerList[2])
                 self.mainCtr.addChild(spineFKControllerList[0])
 
         # create roots grp
         ARCore.createRoots(spineFKControllerList)
-        spineControllerRootsList = ARCore.createRoots(spineIKControllerList)
+        spineControllerRootsList = ARCore.createRoots(self.spineIKControllerList)
 
         # once created roots, we can freeze and hide attributes. if not, it can be unstable
         for neckHeadIKCtr in spineFKControllerList[1:]:
@@ -266,13 +266,13 @@ class RigAuto(object):
             # AimConstraint locators, each locator aim to the upper locator
             if n == 0:
                 # parent first ObjectUpVector, to hips controller
-                spineIKControllerList[0].addChild(ObjectUpVector)
+                self.spineIKControllerList[0].addChild(ObjectUpVector)
             else:
                 aimConstraint = pm.aimConstraint(jointDriverList[-1], jointDriverList[-2], aimVector=(1,0,0), upVector=(0,1,0), worldUpType='object', worldUpObject=ObjectUpVectorList[objUpVectorIndex])
 
 
         # parent last target transform, to chest
-        spineIKControllerList[-1].addChild(ObjectUpVectorList[-1])
+        self.spineIKControllerList[-1].addChild(ObjectUpVectorList[-1])
 
         # objectUpVector conections, by pointContraint
         totalDistance = ObjectUpVectorList[-1].getTranslation('world') - ObjectUpVectorList[0].getTranslation('world')
@@ -305,11 +305,11 @@ class RigAuto(object):
             if re.match('.*(end|hips).*', str(joint)):
                 # last joint and first joint connect to controller
                 # if hips, use de min val, zero. when end, n will be bigger than ik controllers, so use  the last ik controller.
-                spineIkCtrConstr = spineIKControllerList[min(n, len(spineIKControllerList)-1)]
+                spineIkCtrConstr = self.spineIKControllerList[min(n, len(self.spineIKControllerList)-1)]
                 spineIkCtrConstr.rename(str(joint).replace('joint', 'ctr'))  # rename ctr, useful for snap proxy model
                 # constraint
                 pm.pointConstraint(jointDriverList[n], joint, maintainOffset=False,  name='%s_drv_%s_%s_1_pointConstraint' % (self.chName, zone, jointNameSplit))
-                endJointOrientConstraint = pm.orientConstraint(spineIKControllerList[min(n, len(spineIKControllerList)-1)], joint, maintainOffset=True, name='%s_drv_%s_%s_1_orientConstraint' % (self.chName, zone, jointNameSplit))
+                endJointOrientConstraint = pm.orientConstraint(self.spineIKControllerList[min(n, len(self.spineIKControllerList)-1)], joint, maintainOffset=True, name='%s_drv_%s_%s_1_orientConstraint' % (self.chName, zone, jointNameSplit))
                 endJointOrientConstraint.interpType.set(0)
 
             else:
@@ -320,13 +320,18 @@ class RigAuto(object):
         # stretch TODO: print spineJoints list
         ARCore.stretchCurveVolume(spineCurve, spineJoints, '%s_%s' % (self.chName, zone), self.mainCtr)
 
+        # function for create extra content
+        for func in funcs:
+            ikControllers, fkControllers = func()
+            #self.spineIKControllerList = self.spineIKControllerList + ikControllers
+            #spineFKControllerList = spineFKControllerList + fkControllers
+
         # save data
         self.joints[zone] = spineJoints
-        self.ikControllers[zone] = spineIKControllerList
+        self.ikControllers[zone] = self.spineIKControllerList
         self.fkControllers[zone] = spineFKControllerList
-        return spineIKControllerList, spineFKControllerList
+        return self.spineIKControllerList, spineFKControllerList
 
-    #@checker_auto('decorated')
     def neckHead_auto(self, zone='neckHead'):
         # store joints, not end joint
         neckHeadJoints = [point for point in pm.ls() if re.match('^%s.*(neck|head).*joint$' % self.chName, str(point))]
@@ -557,7 +562,6 @@ class RigAuto(object):
         return neckHeadIKCtrList, neckHeadFKCtrList
 
     #TODO: rename method ikFkChain_auto
-    #@checker_auto('decorated')
     def ikFkChain_auto(self, side, parent, zone='leg', stretch=True, bendingBones=False, *funcs):
         """
         # TODO: organize and optimize this method
@@ -571,6 +575,7 @@ class RigAuto(object):
         """
         zoneA = zone
         self.lastZone = zone  # review
+        self.lastSide = side  # review
         fkColor = 14 if side == 'left' else 29
         # be careful with poseInterpolator
         legJoints = [point for point in pm.ls() if re.match('^%s.*(%s).(?!twist).*%s.*joint$' % (self.chName, zoneA, side), str(point).lower())]
@@ -1323,6 +1328,10 @@ class RigAuto(object):
 
 
     def clavicle_auto(self, side,  zone='clavicle', *funcs):
+        """
+        This method should be called as a *arg for ikFkChain_auto.
+        :return:
+        """
         # TODO, detect parent from las ikFk chain
         fkColor = 14 if side == 'left' else 29
         clavicleJoints = [point for point in pm.ls() if re.match('^%s.*(%s).(?!_end)(?!0)(?!twist).*%s.*joint$' % (self.chName, zone, side), str(point))]
@@ -1385,6 +1394,101 @@ class RigAuto(object):
             pm.orientConstraint(clavicleMainList[i], joint, maintainOffset=True)
 
         return [], clavicleMainList
+
+    def addCluster(self, cluster, parent, controllerType):
+        """
+        Take a cluster or create it, move it to the controller system, create a controller and vinculate
+        :arg: cluster(str or pm): name of the cluster transform node
+        :return:
+        """
+        # cluster var type
+        if isinstance(cluster, str):
+            cluster = pm.PyNode(cluster)
+        clusterMatrix = pm.xform(cluster, ws=True, m=True, q=True)
+
+        # look for cluster root
+        clusterRoot = cluster.getParent()
+        # check if parent is a root.
+        if clusterRoot:
+            rootMatrix = pm.xform(clusterRoot, ws=True, m=True, q=True)
+            if rootMatrix == clusterMatrix and len(clusterRoot.listRelatives(c=True)) == 1:
+                pass
+            else:
+                clusterRoot = ARCore.createRoots([cluster])
+        else:
+            clusterRoot = ARCore.createRoots([cluster])
+
+        # look if cluster is relative
+        # we need cluster DGnode
+        clusterShape = cluster.getShape()
+        clusterDG = clusterShape.clusterTransforms[0].outputs()[0]
+        clusterDG.relative.set(True)
+
+        # visibility shape
+        clusterShape.visibility.set(False)
+
+        # parent cluster root
+        parent.addChild(clusterRoot)
+
+        # createController
+        controller = self.create_controller('%s_ctr' % str(cluster), controllerType, 1.0, 24)
+        # align with cluster, we need to query world space pivot
+        controller.setTranslation(cluster.getPivots(ws=True)[0], 'world')
+        #pm.xform(controller, ws=True, m=clusterMatrix)
+        #parent
+        parent.addChild(controller)
+        # create root
+        controllerRoot = ARCore.createRoots([controller])
+
+        # connect controllr and cluster
+        pm.parentConstraint(controller, cluster, maintainOffset=False, name='%s_parentConstraint' % str(cluster))
+        ARCore.connectAttributes(controller, cluster, ['scale'], 'XYZ')
+
+        return [controller], []
+
+    def ikFkChain_wire(self, mesh, controllerType):
+        """
+        This method should be called as a *arg for ikFkChain_auto.
+        Create a wire deformer and put in the hierarchy
+        :return:
+        """
+        self.legMainJointList
+        # create wire deformer
+        wire, curve = ARCore.setWireDeformer(self.legMainJointList, mesh, '%s_%s_%s' % (self.chName, self.lastZone, self.lastSide))
+        # Find base curve
+        baseCurve = wire.baseWire[0].inputs()[0]
+        # get controls
+        curveTransforms = ARCore.TransformCurveCVCtr(curve)
+        baseCurveTransforms = ARCore.TransformCurveCVCtr(baseCurve)
+
+        # TODO: more procedural
+        # vinculate to rig
+        for i, trn in enumerate(curveTransforms):
+            self.legMainJointList[i].addChild(trn)
+            self.legMainJointList[i].addChild(baseCurveTransforms[i])
+
+            if i != 0 and i != len(curveTransforms)-1:
+                # createController
+                controller = self.create_controller('%s_%s_%s_wire_ctr' % (self.chName, self.lastZone, self.lastSide), 'pole', 2.0, 4)
+                pm.xform(controller, ws=True, m=pm.xform(trn, q=True, ws=True, m=True))
+
+                self.legMainJointList[i].addChild(controller)
+
+                # create Roots
+                ARCore.createRoots([controller])
+
+                # parent contraint
+                pm.parentConstraint(controller, trn, maintainOffset=False)
+
+        # curves to no xform grp
+        self.noXformGrp.addChild(curve.getTransform())
+        self.noXformGrp.addChild(baseCurve.getTransform())
+
+
+
+
+
+        return [], []
 
     def create_controller(self, name, controllerType, s=1.0, colorIndex=4):
         """

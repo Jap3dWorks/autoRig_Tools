@@ -749,7 +749,7 @@ def connectAttributes(driver, driven, attributes, axis):
         driver: source of the connection
         driven: destiny of the connection
         attributes: attributes to connect p.e scale, translate
-        axis: axis of the attribute p.e X, Y, Z
+        axis: axis of the attribute p.e ['X', 'Y', 'Z'] or XYZ
     """
     for attribute in attributes:
         for axi in axis:
@@ -884,7 +884,6 @@ def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
     :param curve(str): curve shape
     :param distance(float):
     :return: List with vertex indexes
-             List with vertex components
     """
     # use the API, Faster for this type of operations
     mSelection = OpenMaya.MSelectionList()
@@ -908,7 +907,6 @@ def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
     # mscriptUtil
     util = OpenMaya.MScriptUtil()
     vertexIndexes = []  # store vertex indexes
-    vertexComponent = OpenMaya.MObjectArray()  # store vertex MObject
     while not meshVertIt.isDone():
         # store vertex position
         vertexPosition = meshVertIt.position(OpenMaya.MSpace.kWorld)
@@ -933,11 +931,10 @@ def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
             # let some precision interval
             if not (dotProduct > 0.1 or dotProduct < -0.1):
                 vertexIndexes.append(meshVertIt.index())
-                vertexComponent.append(meshVertIt.currentItem())
 
         meshVertIt.next()
 
-    return vertexIndexes, vertexComponent
+    return vertexIndexes
 
 def smoothDeformerWeights(deformer):
     """
@@ -1013,14 +1010,18 @@ def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
     if not mesh:
         mesh = getSkinedMeshFromJoint(joints[0]).pop()
     else:
+        # check type node
+        if isinstance(mesh, str):
+            mesh = pm.PyNode(mesh)
         if isinstance(mesh, pm.nodetypes.Transform):
             mesh = mesh.getShape()
 
     # get affected vertex
-    affectedVertex, vertexComponents = vertexIntoCurveCilinder(str(mesh), str(curve.getShape()), 15, .05, .98)
+    affectedVertex = vertexIntoCurveCilinder(str(mesh), str(curve.getShape()), 15, .05, .98)
 
     # create wire deformer
-    wire = pm.wire(mesh, gw=False, w=curve, dds=(0, 40))[0]
+    wire, wireCurve = pm.wire(mesh, gw=False, w=curve, dds=(0, 40))
+    logger.debug('wire curve: %s' % wireCurve)
     pm.percent(wire, mesh, v=0)
     for index in affectedVertex:
         pm.percent(wire, mesh.vtx[index], v=1)
@@ -1029,3 +1030,28 @@ def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
     # smooth weights
     for i in range(4):  # review
         smoothDeformerWeights(str(wire))
+
+    return wire, curve
+
+def TransformCurveCVCtr(curve):
+    """
+    Connect transformations to each curve control point
+    :param curve(str or pm):
+    :return (list): list with created transformations
+    """
+    # check curve type data
+    if isinstance(curve, str):
+        curve = pm.PyNode(curve)
+    if isinstance(curve, pm.nodetypes.Transform):
+        curve = curve.getShape()
+
+    transforms = []
+    for n, point in enumerate(curve.getCVs()):
+        transform = pm.group(empty=True)
+        transform.setTranslation(point)
+        decomposeMatrix = pm.createNode('decomposeMatrix')
+        transform.worldMatrix[0].connect(decomposeMatrix.inputMatrix)
+        decomposeMatrix.outputTranslate.connect(curve.controlPoints[n])
+        transforms.append(transform)
+
+    return transforms
