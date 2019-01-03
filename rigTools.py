@@ -900,3 +900,28 @@ class CopyDeforms(object):
         pm.delete(targetBShapes)
 
         return BlendShapeNode, BSNames
+
+
+class PickerTools(object):
+    @staticmethod
+    def addPickerAttribute(attribute='picker', expression='pass'):
+        selection = cmds.ls(sl=True)
+        for sel in selection:
+            if not cmds.attributeQuery(attribute, node=sel):
+                cmds.addAttr(sel, longName=attribute, shortName=attribute, dt='string')
+
+            cmds.setAttr('%s.%s' % (sel, attribute), expression, type='string')
+
+    ## copy colors ##
+    @staticmethod
+    def copyShapeColor():
+        selection = cmds.ls(sl=True)
+        colorObject = selection[0]
+        shape = cmds.listRelatives(colorObject, s=True)[0]
+        color = cmds.getAttr('%s.overrideColorRGB' % shape)[0]
+        print color
+
+        for sel in selection[1:]:
+            selShape = cmds.listRelatives(sel, s=True)[0]
+            print selShape
+            cmds.setAttr('%s.overrideColorRGB' % selShape, *color)
