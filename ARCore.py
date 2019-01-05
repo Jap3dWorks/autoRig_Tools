@@ -1065,6 +1065,7 @@ def latticeBendDeformer(lattice, controller=None):
     :return(list): Transform nodes created in the function:  scaleGrp, referenceBase, referenceController, bendTransform,
     :return: controllerRoot
     """
+    # TODO: test with non world aligned lattices
     # check data type
     # check lattice type data
     if isinstance(lattice, str):
@@ -1078,6 +1079,12 @@ def latticeBendDeformer(lattice, controller=None):
     if not isinstance(controller, pm.nodetypes.Transform):
         logger.info('controller must be a transform node')
         return
+
+    latticeTransform = lattice.getTransform()
+    # check lattice visibility, important to query correctly the bbox
+    if not latticeTransform.visibility.get():
+        latticeTransform.visibility.set(True)
+
     # lattice bbox
     latticeTransform = lattice.getTransform()
     latBbox = latticeTransform.boundingBox()
@@ -1206,12 +1213,4 @@ def latticeBendDeformer(lattice, controller=None):
     for axis in ('X', 'Z'):
         inverse.outputX.connect(scaleGrp.attr('scale%s' % axis))
 
-    """
-    # lattice nodes
-    ffd = lattice.worldMatrix.outputs()[0]
-    logger.debug('ffd1: %s' % ffd)
-    latticeBase = ffd.baseLatticeMatrix.inputs()[0]
-    logger.debug('latticeBase %s' % latticeBase)
-    """
-
-    return scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot
+    return [scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot]
