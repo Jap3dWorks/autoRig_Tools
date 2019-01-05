@@ -220,7 +220,8 @@ class RigAuto(object):
             ARCore.lockAndHideAttr(neckHeadIKCtr, True, False, False)
 
         # create points on curve that will drive the joints
-        jointDriverList = []
+        # this is like the main joint.
+        self.jointDriverList = []
         ObjectUpVectorList = []
         for n, joint in enumerate(spineJoints):
             # jointPosition
@@ -250,7 +251,7 @@ class RigAuto(object):
             pointOnCurveInfo.position.connect(jointDriverGrp.translate)
             noXformSpineGrp.addChild(jointDriverGrp)
             # drive joint by a parent constraint
-            jointDriverList.append(jointDriverGrp)
+            self.jointDriverList.append(jointDriverGrp)
 
             # index to assign upVector Object
             objUpVectorIndex = -1
@@ -268,7 +269,7 @@ class RigAuto(object):
                 # parent first ObjectUpVector, to hips controller
                 self.spineIKControllerList[0].addChild(ObjectUpVector)
             else:
-                aimConstraint = pm.aimConstraint(jointDriverList[-1], jointDriverList[-2], aimVector=(1,0,0), upVector=(0,1,0), worldUpType='object', worldUpObject=ObjectUpVectorList[objUpVectorIndex])
+                aimConstraint = pm.aimConstraint(self.jointDriverList[-1], self.jointDriverList[-2], aimVector=(1,0,0), upVector=(0,1,0), worldUpType='object', worldUpObject=ObjectUpVectorList[objUpVectorIndex])
 
 
         # parent last target transform, to chest
@@ -308,14 +309,14 @@ class RigAuto(object):
                 spineIkCtrConstr = self.spineIKControllerList[min(n, len(self.spineIKControllerList)-1)]
                 spineIkCtrConstr.rename(str(joint).replace('joint', 'ctr'))  # rename ctr, useful for snap proxy model
                 # constraint
-                pm.pointConstraint(jointDriverList[n], joint, maintainOffset=False,  name='%s_drv_%s_%s_1_pointConstraint' % (self.chName, zone, jointNameSplit))
+                pm.pointConstraint(self.jointDriverList[n], joint, maintainOffset=False,  name='%s_drv_%s_%s_1_pointConstraint' % (self.chName, zone, jointNameSplit))
                 endJointOrientConstraint = pm.orientConstraint(self.spineIKControllerList[min(n, len(self.spineIKControllerList)-1)], joint, maintainOffset=True, name='%s_drv_%s_%s_1_orientConstraint' % (self.chName, zone, jointNameSplit))
                 endJointOrientConstraint.interpType.set(0)
 
             else:
                 # connect to deform joints
-                jointDriverList[n].rename(str(joint).replace('joint', 'main'))  # rename driver, useful for snap proxy model
-                pm.parentConstraint(jointDriverList[n], joint, maintainOffset=True, name='%s_drv_%s_%s_1_parentConstraint' % (self.chName, zone, jointNameSplit))
+                self.jointDriverList[n].rename(str(joint).replace('joint', 'main'))  # rename driver, useful for snap proxy model
+                pm.parentConstraint(self.jointDriverList[n], joint, maintainOffset=True, name='%s_drv_%s_%s_1_parentConstraint' % (self.chName, zone, jointNameSplit))
 
         # stretch TODO: print spineJoints list
         ARCore.stretchCurveVolume(spineCurve, spineJoints, '%s_%s' % (self.chName, zone), self.mainCtr)
@@ -332,7 +333,14 @@ class RigAuto(object):
         self.fkControllers[zone] = spineFKControllerList
         return self.spineIKControllerList, spineFKControllerList
 
-    def neckHead_auto(self, zone='neckHead'):
+    def neckHead_auto(self, zone='neckHead', *funcs):
+        """
+        Create neck head system
+        :param zone:
+        :param funcs:
+        :return:
+        """
+        self.lastZone=zone
         # store joints, not end joint
         neckHeadJoints = [point for point in pm.ls() if re.match('^%s.*(neck|head).*joint$' % self.chName, str(point))]
         logger.debug('Neck head joints: %s' % neckHeadJoints)
@@ -353,7 +361,7 @@ class RigAuto(object):
 
         # create locators and connect to curve CV's
         neckHeadDrvList = []
-        neckHeadIKCtrList = []
+        self.neckHeadIKCtrList = []
         neckHeadFKCtrList = []
 
         for n, point in enumerate(neckHeadCurve.getCVs()):
@@ -372,21 +380,21 @@ class RigAuto(object):
             # TODO: better continue after if
             if n > 1 and not n == neckHeadCurve.numCVs()-2:
                 # create controller and parent drivers to controllers
-                ctrType = 'neck' if not len(neckHeadIKCtrList) else 'head'
+                ctrType = 'neck' if not len(self.neckHeadIKCtrList) else 'head'
                 neckHeadIKCtr = self.create_controller('%s_%s_%s_1_ik_ctr' % (self.chName, zone, ctrType), '%sIk' % ctrType, 1, 17)
                 logger.debug('neckHead controller: %s' % neckHeadIKCtr)
 
                 if n == neckHeadCurve.numCVs() - 1:  # las iteration
-                    lastSpineIkController = neckHeadIKCtrList[-1].getTranslation('world')
+                    lastSpineIkController = self.neckHeadIKCtrList[-1].getTranslation('world')
                     neckHeadIKCtr.setTranslation((point[0], point[1], point[2]))
                 else:
                     neckHeadIKCtr.setTranslation(neckHeadJoints[1].getTranslation('world'), 'world')  # controller and joint same position
 
                 neckHeadIKCtr.addChild(neckHeadDriver)
-                neckHeadIKCtrList.append(neckHeadIKCtr)  # add to ik controller List
+                self.neckHeadIKCtrList.append(neckHeadIKCtr)  # add to ik controller List
 
                 # create FK controllers, only with the first ik controller
-                if len(neckHeadIKCtrList) == 1:
+                if len(self.neckHeadIKCtrList) == 1:
                     neckHeadFKCtr = self.create_controller('%s_%s_%s_1_fk_ctr' % (self.chName, zone, ctrType), 'neckFk1',1,4)
                     neckHeadFKCtr.setTranslation(neckHeadJoints[0].getTranslation('world'), 'world')
                     neckHeadFKCtrList.append(neckHeadFKCtr)
@@ -404,32 +412,32 @@ class RigAuto(object):
                         logger.debug('parent %s, child %s' % (neckHeadFKCtrList[-1], neckHeadFKCtr))
 
         # configure ctr hierarchy
-        neckHeadFKCtrList[-1].addChild(neckHeadIKCtrList[-1])
-        neckHeadIKCtrList[-1].addChild(neckHeadDrvList[-2])  # add the penultimate driver too
-        #self.ikControllers['spine'][-1].addChild(neckHeadIKCtrList[0])  # ik controller child of last spine controller
-        neckHeadIKCtrList[0].addChild(neckHeadDrvList[1])
+        neckHeadFKCtrList[-1].addChild(self.neckHeadIKCtrList[-1])
+        self.neckHeadIKCtrList[-1].addChild(neckHeadDrvList[-2])  # add the penultimate driver too
+        #self.ikControllers['spine'][-1].addChild(self.neckHeadIKCtrList[0])  # ik controller child of last spine controller
+        self.neckHeadIKCtrList[0].addChild(neckHeadDrvList[1])
         # rename head control
-        neckHeadIKCtrList[-1].rename('%s_%s_head_1_IK_ctr' % (self.chName, zone))  # review: better here or above?
+        self.neckHeadIKCtrList[-1].rename('%s_%s_head_1_IK_ctr' % (self.chName, zone))  # review: better here or above?
         # Fk parent to last ik spine controller
         self.ikControllers['spine'][-1].addChild(neckHeadFKCtrList[0])
 
         # create roots grp
         neckHeadFKCtrRoots = ARCore.createRoots(neckHeadFKCtrList)
-        neckHeadIKCtrRoots = ARCore.createRoots(neckHeadIKCtrList)
+        neckHeadIKCtrRoots = ARCore.createRoots(self.neckHeadIKCtrList)
         # once created roots, we can freeze and hide attributes. if not, it can be unstable
         for neckHeadFKCtr in neckHeadFKCtrList:
             ARCore.lockAndHideAttr(neckHeadFKCtr, True, False, False)
         # lock and hide neck attr, it's here because we have only one
-        ARCore.lockAndHideAttr(neckHeadIKCtrList[0], False, True, True)
+        ARCore.lockAndHideAttr(self.neckHeadIKCtrList[0], False, True, True)
 
         # head orient auto, isolate
         # head orient neck grp
         neckOrientAuto = pm.group(empty=True, name='%s_orientAuto_%s_head_1_grp' % (self.chName, zone))
-        neckOrientAuto.setTranslation(neckHeadIKCtrList[-1].getTranslation('world'), 'world')
+        neckOrientAuto.setTranslation(self.neckHeadIKCtrList[-1].getTranslation('world'), 'world')
         neckHeadFKCtrList[-1].addChild(neckOrientAuto)
 
         headIkAutoGrp = pm.group(empty=True, name='%s_orientAuto_%s_head_ikAuto_1_grp' % (self.chName, zone))
-        headIkAutoGrp.setTranslation(neckHeadIKCtrList[-1].getTranslation('world'), 'world')
+        headIkAutoGrp.setTranslation(self.neckHeadIKCtrList[-1].getTranslation('world'), 'world')
         neckHeadFKCtrList[-1].addChild(headIkAutoGrp)
         headIkAutoGrp.addChild(neckHeadIKCtrRoots[-1])
 
@@ -439,9 +447,9 @@ class RigAuto(object):
         self.mainCtr.addChild(baseOrientAuto)
 
         # create driver attr
-        pm.addAttr(neckHeadIKCtrList[-1], longName='isolateOrient', shortName='isolateOrient', minValue=0.0,
+        pm.addAttr(self.neckHeadIKCtrList[-1], longName='isolateOrient', shortName='isolateOrient', minValue=0.0,
                    maxValue=1.0, type='float', defaultValue=0.0, k=True)
-        pm.addAttr(neckHeadIKCtrList[-1], longName='isolatePoint', shortName='isolatePoint', minValue=0.0,
+        pm.addAttr(self.neckHeadIKCtrList[-1], longName='isolatePoint', shortName='isolatePoint', minValue=0.0,
                    maxValue=1.0, type='float', defaultValue=0.0, k=True)
 
         # constraint head controller offset to orient auto grps
@@ -449,13 +457,13 @@ class RigAuto(object):
         autoPointConstraint = pm.pointConstraint(baseOrientAuto, neckOrientAuto, headIkAutoGrp, maintainOffset=False, name='%s_autoOrient_%s_head_1_pointConstraint' % (self.chName, zone))
 
         # create Nodes and connect
-        neckHeadIKCtrList[-1].isolateOrient.connect(autoOrientConstraint.attr('%sW0' % str(baseOrientAuto)))
-        neckHeadIKCtrList[-1].isolatePoint.connect(autoPointConstraint.attr('%sW0' % str(baseOrientAuto)))
+        self.neckHeadIKCtrList[-1].isolateOrient.connect(autoOrientConstraint.attr('%sW0' % str(baseOrientAuto)))
+        self.neckHeadIKCtrList[-1].isolatePoint.connect(autoPointConstraint.attr('%sW0' % str(baseOrientAuto)))
 
         plusMinusAverageOrient = pm.createNode('plusMinusAverage', name='%s_orientAuto_%s_head_isolateOrient_1_plusMinusAverage' % (self.chName, zone))
         plusMinusAveragepoint = pm.createNode('plusMinusAverage', name='%s_pointAuto_%s_head_isolateOrient_1_plusMinusAverage' % (self.chName, zone))
-        neckHeadIKCtrList[-1].isolateOrient.connect(plusMinusAverageOrient.input1D[1])
-        neckHeadIKCtrList[-1].isolatePoint.connect(plusMinusAveragepoint.input1D[1])
+        self.neckHeadIKCtrList[-1].isolateOrient.connect(plusMinusAverageOrient.input1D[1])
+        self.neckHeadIKCtrList[-1].isolatePoint.connect(plusMinusAveragepoint.input1D[1])
 
         plusMinusAverageOrient.input1D[0].set(1)
         plusMinusAveragepoint.input1D[0].set(1)
@@ -465,7 +473,8 @@ class RigAuto(object):
         plusMinusAveragepoint.output1D.connect(autoPointConstraint.attr('%sW1' % str(neckOrientAuto)))
 
         # create points on curve that will drive the joints
-        jointDriverList = []
+        # this is like main joint
+        self.neckHeadJointDriverList = []
         ObjectUpVectorList = []
         for n, joint in enumerate(neckHeadJoints[:-1]):
             # jointPosition
@@ -497,7 +506,7 @@ class RigAuto(object):
             pointOnCurveInfo.position.connect(jointDriverGrp.translate)
             noXformNeckHeadGrp.addChild(jointDriverGrp)
             # drive joint by a parent constraint
-            jointDriverList.append(jointDriverGrp)
+            self.neckHeadJointDriverList.append(jointDriverGrp)
 
             # up vector transforms, useful for later aimContraint
             ObjectUpVector = pm.group(empty=True, name='%s_upVector' % str(joint))
@@ -511,11 +520,11 @@ class RigAuto(object):
                 # parent first target transform, to hips controller
                 self.ikControllers['spine'][-1].addChild(ObjectUpVector)
             if n > 0:
-                aimConstraint = pm.aimConstraint(jointDriverList[-1], jointDriverList[-2], aimVector=(1, 0, 0),
+                aimConstraint = pm.aimConstraint(self.neckHeadJointDriverList[-1], self.neckHeadJointDriverList[-2], aimVector=(1, 0, 0),
                                                  upVector=(0, 1, 0), worldUpType='object', worldUpObject=ObjectUpVectorList[-2])
 
         # parent last target transform, to chest
-        neckHeadIKCtrList[-1].addChild(ObjectUpVectorList[-1])
+        self.neckHeadIKCtrList[-1].addChild(ObjectUpVectorList[-1])
 
         # connect by pointConstraint objectUpVector from first to last upVectors
         totalDistance = ObjectUpVectorList[-1].getTranslation('world') - ObjectUpVectorList[0].getTranslation('world')
@@ -528,7 +537,7 @@ class RigAuto(object):
             pointConstraintFactor = distance / totalDistance
 
             pointContraint = pm.pointConstraint(ObjectUpVectorList[-1], ObjectUpVectorList[0], upVectorObject,
-                                                maintainOffset=False, name='%s_drv_%s_%s_upVector_pointConstraint' % (self.chName,zone,jointNameSplit))
+                                                maintainOffset=False, name='%s_drv_%s_%s_upVector_pointConstraint' % (self.chName, zone, jointNameSplit))
             pointContraint.attr('%sW0' % str(ObjectUpVectorList[-1])).set(pointConstraintFactor)
             pointContraint.attr('%sW1' % str(ObjectUpVectorList[0])).set(1 - pointConstraintFactor)
 
@@ -543,23 +552,29 @@ class RigAuto(object):
             # review: create parent constraints, once drivers have been created, if not, all flip
             if re.match('.*head.*', str(joint)):
                 # head joint, with point to driver, and orient to controller
-                pm.pointConstraint(jointDriverList[n], joint, maintainOffset=False, name='%s_drv_%s_%s_1_pointConstraint' % (self.chName, zone, jointNameSplit))
+                pm.pointConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=False, name='%s_drv_%s_%s_1_pointConstraint' % (self.chName, zone, jointNameSplit))
                 # orient to controller
-                neckHeadIKCtrList[-1].rename(str(joint).replace('joint', 'ctr'))  # rename, useful for snap proxy model
-                pm.orientConstraint(neckHeadIKCtrList[-1], joint, maintainOffset=True, name='%s_drv_%s_%s_1_orientConstraint' % (self.chName, zone, jointNameSplit))
+                self.neckHeadIKCtrList[-1].rename(str(joint).replace('joint', 'ctr'))  # rename, useful for snap proxy model
+                pm.orientConstraint(self.neckHeadIKCtrList[-1], joint, maintainOffset=True, name='%s_drv_%s_%s_1_orientConstraint' % (self.chName, zone, jointNameSplit))
 
             else:
-                jointDriverList[n].rename(str(joint).replace('joint', 'main'))  # rename, useful for snap proxy model
-                pm.parentConstraint(jointDriverList[n], joint, maintainOffset=True, name='%s_drv_%s_%s_1_parentConstraint' % (self.chName, zone, jointNameSplit))
+                self.neckHeadJointDriverList[n].rename(str(joint).replace('joint', 'main'))  # rename, useful for snap proxy model
+                pm.parentConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=True, name='%s_drv_%s_%s_1_parentConstraint' % (self.chName, zone, jointNameSplit))
 
         # stretch
         ARCore.stretchCurveVolume(neckHeadCurve, neckHeadJoints[:-1], '%s_%s' % (self.chName, zone), self.mainCtr)
 
+        # extra functions
+        for func in funcs:
+            ikControllers, fkControllers = func()
+            self.neckHeadIKCtrList = self.neckHeadIKCtrList + ikControllers
+            neckHeadFKCtrList = neckHeadFKCtrList + fkControllers
+
         # save data
         self.joints[zone] = neckHeadJoints
-        self.ikControllers[zone] = neckHeadIKCtrList
+        self.ikControllers[zone] = self.neckHeadIKCtrList
         self.fkControllers[zone] = neckHeadFKCtrList
-        return neckHeadIKCtrList, neckHeadFKCtrList
+        return self.neckHeadIKCtrList, neckHeadFKCtrList
 
     #TODO: rename method ikFkChain_auto
     def ikFkChain_auto(self, side, parent, zone='leg', stretch=True, bendingBones=False, *funcs):
@@ -1495,6 +1510,52 @@ class RigAuto(object):
         baseCurve.visibility.set(False)
 
         return [], []
+
+    def latticeBend_auto(self, lattice, parent):
+        """
+        Given a lattice, create a bend deformer and connect it to the rig
+        :param lattice (str or pm): lattice transform node or shape
+        :param parent (str or pm):
+        :return:
+        """
+        # check data type
+        # check lattice type data
+        if isinstance(lattice, str):
+            lattice = pm.PyNode(lattice)
+        if isinstance(lattice, pm.nodetypes.Transform):
+            latticeTransform = lattice
+            lattice = lattice.getShape()
+
+        if isinstance(parent, str):
+            parent = pm.PyNode(parent)
+
+        # lattice nodes
+        ffd = lattice.worldMatrix.outputs()[0]
+        logger.debug('ffd1: %s' % ffd)
+        latticeBase = ffd.baseLatticeMatrix.inputs()[0]
+        logger.debug('latticeBase %s' % latticeBase)
+
+        # look if lastSide attr exist
+        baseName = [self.chName, self.lastZone]
+        if hasattr(self, 'lastSide'):
+            # if it is the case, append to name
+            baseName.append(self.lastSide)
+
+        baseName.extend(['lattice', 'ctr'])
+        controllerName = '_'.join(baseName)
+
+        controller = self.create_controller(controllerName, 'pole', 1.8, 24)
+        latticeList = ARCore.latticeBendDeformer(lattice, controller)
+
+        # parent
+        latticeList.append(latticeBase)
+        pm.parent(latticeList, parent)
+
+        # hide lattice
+        latticeTransform.visibility.set(False)
+
+        return [], []
+
 
     def create_controller(self, name, controllerType, s=1.0, colorIndex=4):
         """
