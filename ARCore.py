@@ -1055,3 +1055,163 @@ def TransformCurveCVCtr(curve):
         transforms.append(transform)
 
     return transforms
+
+def latticeBendDeformer(lattice, controller=None):
+    """
+    connect a bend deformer to a lattice, and the necessary nodes.
+    Controller should have transforms to zero.
+    :param lattice: lattice transform or shape
+    :param controller: Controller for the system
+    :return(list): Transform nodes created in the function:  scaleGrp, referenceBase, referenceController, bendTransform,
+    :return: controllerRoot
+    """
+    # check data type
+    # check lattice type data
+    if isinstance(lattice, str):
+        lattice = pm.PyNode(lattice)
+    if isinstance(lattice, pm.nodetypes.Transform):
+        lattice = lattice.getShape()
+
+    #check controller type
+    if isinstance(controller, str):
+        controller = pm.PyNode(controller)
+    if not isinstance(controller, pm.nodetypes.Transform):
+        logger.info('controller must be a transform node')
+        return
+    # lattice bbox
+    latticeTransform = lattice.getTransform()
+    latBbox = latticeTransform.boundingBox()
+    logger.debug('LatBboc: %s' % latBbox)
+
+    # Util transform  data
+    centerPoint = (latBbox[0]+latBbox[1])/2
+    logger.debug('Lattice center point: %s, %s' % (centerPoint, type(centerPoint)))
+    # min and max centered points
+    minPoint = pm.datatypes.Point(centerPoint[0], latBbox[0][1], centerPoint[2])
+    maxPoint = pm.datatypes.Point(centerPoint[0], latBbox[1][1], centerPoint[2])
+    latHigh = latBbox[1][1] - latBbox[0][1]
+
+    # reposition controller
+    controller.setTranslation(maxPoint, 'world')
+    # root the controller
+    controllerRoot = createRoots([controller])[0]
+
+    # create bend deformer
+    # review, get some warnings here, maybe cmds is a better option
+    bend, bendTransform = cmds.nonLinear(str(lattice), type='bend', lowBound=-1, curvature=0)
+    bendTransform = pm.PyNode(bendTransform)
+    bendTransform.setTranslation(minPoint, 'world')
+    cmds.setAttr('%s.lowBound' %(bend), 0)
+    cmds.setAttr('%s.highBound' % (bend), 1)
+    # set scale lattice
+    bendTransform.scale.set([latHigh,latHigh,latHigh])
+
+    ## create nodes ##
+    distanceBettween = pm.createNode('distanceBetween')
+    distanceBettween.point2.set([0,0,0])
+    # don't connect y component
+    for axis in ('X', 'Z'):
+        controller.attr('translate%s' % axis).connect(distanceBettween.attr('point1%s' % axis))
+
+    # condition, to avoid vector with length 0
+    condition = pm.createNode('condition')
+    distanceBettween.distance.connect(condition.firstTerm)
+    conditionAxis=['R','B']
+    for i, axis in enumerate(['X','Z']):
+        controller.attr('translate%s' % axis).connect(condition.attr('colorIfFalse%s' % conditionAxis[i]))
+
+    condition.colorIfFalseG.set(0)
+    condition.colorIfTrue.set([0.001, 0, 0])
+
+    # normalizeVector
+    normalize=pm.createNode('vectorProduct')
+    normalize.operation.set(0)
+    normalize.normalizeOutput.set(True)  # normalized
+    condition.outColor.connect(normalize.input1)
+    # find vector z, use cross product
+    crossProduct = pm.createNode('vectorProduct')
+    crossProduct.normalizeOutput.set(True)  # normalize
+    crossProduct.operation.set(2)
+    normalize.output.connect(crossProduct.input1)
+    crossProduct.input2.set([0, 1, 0])
+    # create fourByFour matrix
+    matrix = pm.createNode('fourByFourMatrix')
+    # vector X
+    for i, axis in enumerate(['X', 'Y', 'Z']):
+        normalize.attr('output%s' % axis).connect(matrix.attr('in0%s'% i))
+    # vector Z
+    for i, axis in enumerate(['X', 'Y', 'Z']):
+        crossProduct.attr('output%s' % axis).connect(matrix.attr('in2%s'% i))
+
+    # decompose Matrix
+    decomposeMatrix = pm.createNode('decomposeMatrix')
+    matrix.output.connect(decomposeMatrix.inputMatrix)
+    # connect rotation
+    decomposeMatrix.outputRotate.connect(bendTransform.rotate)
+
+    ## curvature ##
+    decomposeMatrixController = pm.createNode('decomposeMatrix')
+    controller.worldMatrix.connect(decomposeMatrixController.inputMatrix)
+    # transformNodes
+    referenceController = pm.group(empty=True, name='%s_ctr_ref' % str(latticeTransform))
+    pm.xform(referenceController, ws=True, m=pm.xform(controller, q=True, ws=True, m=True))
+    referenceBase = pm.group(empty=True, name='%s_base_ref' % str(latticeTransform))
+    referenceBase.setTranslation(minPoint, 'world')
+    # ref Controller
+    RefControllerDecMatr = pm.createNode('decomposeMatrix')
+    referenceController.worldMatrix.connect(RefControllerDecMatr.inputMatrix)
+    #base
+    refBaseDecMatr = pm.createNode('decomposeMatrix')
+    referenceBase.worldMatrix.connect(refBaseDecMatr.inputMatrix)
+    # firstVector
+    vector1 = pm.createNode('plusMinusAverage')
+    vector1.operation.set(2)  #substract
+    decomposeMatrixController.outputTranslate.connect(vector1.input3D[0])
+    refBaseDecMatr.outputTranslate.connect(vector1.input3D[1])
+    # second vector
+    vector2 = pm.createNode('plusMinusAverage')
+    vector2.operation.set(2)  #substract
+    RefControllerDecMatr.outputTranslate.connect(vector2.input3D[0])
+    refBaseDecMatr.outputTranslate.connect(vector2.input3D[1])
+    # calculate angle
+    angleBetween = pm.createNode('angleBetween')
+    vector1.output3D.connect(angleBetween.vector1)
+    vector2.output3D.connect(angleBetween.vector2)
+    # connect to bend
+    cmds.connectAttr('%s.angle' %(str(angleBetween)), '%s.curvature' % bend)
+
+    ## scale system ##
+    scaleGrp = pm.group(empty=True, name='%s_scale_grp' % str(latticeTransform))
+    scaleGrp.setTranslation(minPoint, 'world')
+    scaleGrp.addChild(latticeTransform)
+
+    # node connection
+    distanceBettween = pm.createNode('distanceBetween')
+    controller.worldMatrix.connect(distanceBettween.inMatrix1)
+    referenceBase.worldMatrix.connect(distanceBettween.inMatrix2)
+    distance = distanceBettween.distance.get()  # get the distance
+    # divide by the original length
+    multiplyDivide = pm.createNode('multiplyDivide')
+    multiplyDivide.operation.set(2)  # set to divide
+    # connect distance
+    distanceBettween.distance.connect(multiplyDivide.input1X)
+    multiplyDivide.input2X.set(distance)
+    # get inverse
+    inverse = pm.createNode('multiplyDivide')
+    inverse.operation.set(2)  # divide
+    inverse.input1X.set(1)
+    multiplyDivide.outputX.connect(inverse.input2X)
+    # connect result to scale group
+    multiplyDivide.outputX.connect(scaleGrp.scaleY)
+    for axis in ('X', 'Z'):
+        inverse.outputX.connect(scaleGrp.attr('scale%s' % axis))
+
+    """
+    # lattice nodes
+    ffd = lattice.worldMatrix.outputs()[0]
+    logger.debug('ffd1: %s' % ffd)
+    latticeBase = ffd.baseLatticeMatrix.inputs()[0]
+    logger.debug('latticeBase %s' % latticeBase)
+    """
+
+    return scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot
