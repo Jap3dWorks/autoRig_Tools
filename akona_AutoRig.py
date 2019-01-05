@@ -25,11 +25,11 @@ def akonaRigA(name='akona', path='D:\_docs\_Animum\Akona'):
     # legs
     for side in sides:
         akonaRig.ikFkChain_auto(side, akonaRig.ikControllers['spine'][0], 'leg', True, True,
-                                lambda: akonaRig.foot_auto(('leg', 'foot', 'toe'), 'zx'))
+                                lambda: akonaRig.foot_auto(('foot', 'toe'), 'zx'))
 
     # arms
     for side in sides:
         akonaRig.ikFkChain_auto(side, akonaRig.ikControllers['spine'][-1], 'arm', True, False,
-                                lambda: akonaRig.hand_auto(('arm', 'hand', 'finger'), None),
+                                lambda: akonaRig.hand_auto(('hand', 'finger'), None),
                                 lambda: akonaRig.clavicle_auto('clavicle'),
                                 lambda: akonaRig.ikFkChain_wire('akona_body_mesh'))

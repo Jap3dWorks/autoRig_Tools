@@ -64,9 +64,11 @@ def snapIkFk(name, zoneA, zoneB, zoneC, side):
         zoneC(str): zone below zoneB to snap p.e toe, finger
         side(str): left or right
     """
+    # TODO rewrite this method, adapting it to name convention and with only one input FIXME
     attrShape = '%s_%s_%s_attrShape' % (name, zoneA, side)
     attrValue = cmds.getAttr('%s.ikFk' % attrShape)
 
+    #Fixme: fix name convention expressions
     # find fk ik Controllers and main
     fkControllers = [i for i in cmds.ls() if
                      re.match('^%s_fk_(%s|%s)_*%s_((?!end).).*ctr$' % (name, zoneA, zoneB, side), str(i))]
