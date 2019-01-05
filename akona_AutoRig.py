@@ -6,7 +6,7 @@ import re
 import autoRig
 reload(autoRig)  # review: delete
 
-def import_model(path='D:/_docs/_Animum/Akona/skinCluster/akona_skinPSD.ma'):
+def import_model(path='D:/_docs/_Animum/Akona/skinCluster/akona_skinPSD_deformers.ma'):
     cmds.file(new=True, force=True)
     cmds.file(path, i=True, force=True)
     # cmds.setAttr('akona_model_grp.visibility', True)
@@ -19,7 +19,7 @@ def akonaRigA(name='akona', path='D:\_docs\_Animum\Akona'):
     akonaRig.spine_auto('spine', lambda: akonaRig.addCluster('akona_chest_cluster', akonaRig.spineIKControllerList[-2], 'chest_cluster'),
                         lambda: akonaRig.addCluster('akona_belly_cluster', akonaRig.spineIKControllerList[1], 'belly_cluster'))
     # neckHead
-    akonaRig.neckHead_auto()
+    akonaRig.neckHead_auto('neckHead', lambda: akonaRig.latticeBend_auto('akona_head_Lattice', akonaRig.neckHeadIKCtrList[-1]))
 
     sides = ['left', 'right']  # side types
     # legs
