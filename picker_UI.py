@@ -73,11 +73,9 @@ class PickerUI(QtWidgets.QWidget):
             parent = QtWidgets.QDialog(parent=getMayaWindow())
             parent.setObjectName('PickerUI')
             parent.setWindowTitle('Picker UI')
-            # parent.closeEvent(lambda: logger.debug('clossing'))
-            # Review: do not work well if not dockable
+            # Review: do not work well if not dockable FIXME
             # add a layout
             dlgLayout = QtWidgets.QVBoxLayout(parent)
-            # dlgLayout.addWidget(self)
 
         parent.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
         super(PickerUI, self).__init__(parent=parent)
@@ -102,7 +100,8 @@ class PickerUI(QtWidgets.QWidget):
         generalGrid = QtWidgets.QGridLayout(self)
 
         buttonsArea = QtWidgets.QWidget()
-        #buttonsArea.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Maximum)
+        buttonsArea.setMinimumSize(self.size, self.size)
+        buttonsArea.setMaximumSize(self.size, self.size)
         self.setAcceptDrops(True)  # accept drag and drop, necessary for move buttons
 
         # container
