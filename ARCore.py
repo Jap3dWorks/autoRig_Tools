@@ -207,16 +207,16 @@ def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
 def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ikJoints, mainJoints, twsitMainJoints, nameInfo, main, poleVector=None):
     """
     create ik and fk stretch system with twistJoints, stretching by translate
-    all the lists must be of the same len()
+    some lists must be of the same len()
     Args:
-        fkObjList : roots fk controllers that will stretch (no the first root) 2
-        fkDistances(list(float)): list of distances between chain elements 2
+        fkObjList : roots fk controllers that will stretch (no the first root)
+        fkDistances(list(float)): list of distances between chain elements 2 --
         nodeAttr(pm.dagNode): shape with ikFk attribute, where fk stretch attribute will be added
-        ikObjList(list): top object and lower object in a ik system 2
+        ikObjList(list): top object and lower object in a ik system 2 --
         ikDistance(float): maximum distance between top and lower element in a ik and fk system # calculate in the func?
-        ikJoints(list): ikJoints that will stretch (no the first joint) 2
+        ikJoints(list): ikJoints that will stretch (no the first joint) 2 --
         char, zone, side: info
-        mainJoints(list(pm.Joint)): MainJoints to connect the stretch (no the first joint) 2
+        mainJoints(list(pm.Joint)): MainJoints to connect the stretch (no the first joint) 2 --
         twsitMainJoints(list(list(pm.joints))) : lists with twist joints
         char, zone, side(str): name of character. zone os the system. side of the system
         main(PyNode): main controller
@@ -227,12 +227,25 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
     attrName = 'fkStretch'
     pm.addAttr(nodeAttr, longName=attrName, shortName=attrName, minValue=.2, maxValue=5, type='float', defaultValue=1.0, k=True)
     outputFk = []
-    for n, obj in enumerate(fkObjList):
+    fkOutRangeParent = fkObjList[-1].listRelatives(ad=True, type='transform')[0]  # store last fk or group created
+    for n, mainJnt in enumerate(mainJoints):
+        # stretch operations
         multiplyFk = pm.createNode('multiplyDivide', name='%s_fkStretch_multiplyDivide' % nameInfo)
         multiplyFk.input1X.set(fkDistances[n])
         nodeAttr.attr(attrName).connect(multiplyFk.input2X)
 
-        multiplyFk.outputX.connect(obj.translateX)
+        if n < len(fkObjList):
+            multiplyFk.outputX.connect(fkObjList[n].translateX)
+
+        else:
+            # fk object do not exists, so we create a empty grp
+            fkStretchGrp = pm.group(empty=True, name='%s_fkStretch%s_grp' % (nameInfo, n - len(fkObjList)-1))
+            pm.xform(fkStretchGrp, ws=True, m=pm.xform(mainJnt, ws=True, q=True, m=True))  # align group
+            fkOutRangeParent.addChild(fkStretchGrp)  # reconstruct hierarchy
+            multiplyFk.outputX.connect(fkStretchGrp.translateX)  # connect x translate value
+            # set again last object
+            fkOutRangeParent = fkStretchGrp
+
         outputFk.append(multiplyFk)
 
     # conserveVolume using conditionalScaleFactor ->  1/conditionalScaleFactor   get inverse
@@ -248,9 +261,7 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
     fkCVScaleFactorInvert.input1D[0].set(1)
     fkConserveVolumeScaleFactor.outputX.connect(fkCVScaleFactorInvert.input1D[1])
 
-
-
-    # ik system
+    ## ik system ##
     if poleVector:  # if pole, create snap to pole
         snapPoleAttrStr = 'snapToPole'
         snapPoleAttr = pm.addAttr(nodeAttr, longName=snapPoleAttrStr, shortName=snapPoleAttrStr, minValue=0, maxValue=1, type='float', defaultValue=0.0, k=True)
@@ -370,6 +381,7 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
             for twstJnt in twsitMainJoints[i][1:]:
                 # first joint of the twistMainJoint does not has to move ()
                 multiplyDivideTwstJnt.outputX.connect(twstJnt.translateX)
+
 
 
 def conserveVolumeAnimNode(animCurve, varyTime, invFactor, Factor, nameInfo):
