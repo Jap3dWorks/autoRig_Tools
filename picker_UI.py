@@ -1,11 +1,8 @@
-"""
-documentation: https://doc.qt.io/qtforpython/index.html
-"""
+# documentation: https://doc.qt.io/qtforpython/index.html
+
 from PySide2 import QtCore, QtGui, QtWidgets
 from shiboken2 import wrapInstance
 from maya import OpenMayaUI
-import maya.api.OpenMaya as OpenMaya
-import pymel.core as pm
 import maya.cmds as cmds
 import math
 from functools import partial
@@ -13,12 +10,12 @@ from functools import partial
 import logging
 logging.basicConfig()
 logger = logging.getLogger('Picker UI:')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 class dragButton(QtWidgets.QPushButton):
     """
     This class define the buttons from the picker UI.
-    Buttons with drag and drop.
+    drag and drop buttons.
     """
     def __init__(self, title, parent):
         super(dragButton, self).__init__(title, parent)
@@ -71,7 +68,7 @@ class PickerUI(QtWidgets.QWidget):
         else:
             deleteDock()
             try:
-                pm.deleteUI('PickerUI')
+                cmds.deleteUI('PickerUI')
             except:
                 logger.debug('no previous ui detected')
 
@@ -85,7 +82,6 @@ class PickerUI(QtWidgets.QWidget):
             dlgLayout.setMargin(0)
             print ('no dock Window')
 
-        # parent.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
         super(PickerUI, self).__init__(parent=parent)
 
         # chName attribute
@@ -143,7 +139,7 @@ class PickerUI(QtWidgets.QWidget):
         :param extraCode:
         :return:
         """
-        # if ikFk attribute is selected
+        # if ikFk attribute is true
         object = '%s_%s' % (self.chName, controller)
         ikfkNodeName = '_'.join(object.split('_')[0:3]) + '_attrShape'
         if ikFk:
@@ -168,16 +164,6 @@ class PickerUI(QtWidgets.QWidget):
         cmds.select(object, r=noKey, tgl=shift, add=controlShift, d=control)
         print 'Select %s' % object
 
-
-    # when close event, delete callbacks
-    def closeEvent(self, event):
-        for i, val in enumerate(self.idCallBack):
-            # Event callback
-            try:
-                OpenMaya.MMessage.removeCallback(val)
-                logger.debug('MMessage Callback removed: %s' % i)
-            except:
-                pass
 
 ## UTILS ##
 def getControllerButtons():
@@ -218,17 +204,12 @@ def getControllerButtons():
 
     return controllers
 
-def getPathFunc(defaultPath):
-    pathWin = QtWidgets.QFileDialog.getExistingDirectory(parent=getMayaWindow(), caption='FBX exporter browser', dir=defaultPath)
-    if not pathWin:
-        return defaultPath
-    return pathWin
 
 def getDock(name='PickerUIDock'):
     deleteDock(name)
     # Creates and manages the widget used to host windows in a layout
     # which enables docking and stacking windows together
-    ctrl = pm.workspaceControl(name, dockToMainWindow=('right', 1), label='Picker UI')
+    ctrl = cmds.workspaceControl(name, dockToMainWindow=('right', 1), label='Picker UI')
     # we need the QT version, MQtUtil_findControl return the qt widget of the named maya control
     qtCtrl = OpenMayaUI.MQtUtil_findControl(ctrl)
     # translate to something python understand
@@ -236,9 +217,11 @@ def getDock(name='PickerUIDock'):
 
     return ptr
 
-def deleteDock(name = 'PickerUIDock'):
-    if pm.workspaceControl(name, query=True, exists=True):
-        pm.deleteUI(name)
+
+def deleteDock(name='PickerUIDock'):
+    if cmds.workspaceControl(name, query=True, exists=True):
+        cmds.deleteUI(name)
+
 
 def getMayaWindow():
     #get maya main window
@@ -246,14 +229,6 @@ def getMayaWindow():
     ptr = wrapInstance(long(win), QtWidgets.QWidget)
     return ptr
 
-"""
-from FbxExporter import FbxExporterUI
-from FbxExporter import FbxExporter
-reload(FbxExporter)
-reload(FbxExporterUI)
-ui = FbxExporterUI.FbxExporterUI(True)
-"""
-"""
-if cmds.getAttr('%s_arm_right_attrShape.ikFk' % self.chName):
-    controller = controller.replace('fk', 'ik')
-"""
+
+if __name__ == '__main__':
+    UI_Picker = PickerUI('akona', 600, False)
