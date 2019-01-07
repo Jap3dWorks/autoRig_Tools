@@ -58,7 +58,7 @@ def createController (name, controllerType, chName, path, scale=1.0, colorIndex=
         controller: pymel transformNode
         transformMatrix: stored position
     """
-    controller, transformMatrix = ctrSaveLoadToJson.ctrLoadJson(controllerType, chName, path, scale, colorIndex)
+    controller, transformMatrix = ctrSaveLoadToJson.SaveLoadControls.ctrLoadJson(controllerType, chName, path, scale, colorIndex)
     controller = pm.PyNode(controller)
     controller.rename(name)
 
@@ -539,7 +539,7 @@ def twistJointsConnect(twistMainJoints, trackMain, nameInfo, pointCnstr=None):
 
     # constraint to main
     twstOrientCntr = pm.orientConstraint(twistRefGrp,twistMainJoints[0], trackGroup, maintainOffset=True, name='%s_twistOri_orientContraint' % nameInfo)
-    twstOrientCntr.interpType.set(0)
+    twstOrientCntr.interpType.set(0)  # no flip or shortest
     # necessary for stretch, if not, twist joint does not follow main joints
     pm.pointConstraint(pointCnstr, twistMainJoints[0], maintainOffset=False, name='%s_twistPnt_pointConstraint' % nameInfo)
     # CreateIk
@@ -709,6 +709,14 @@ def orientToPlane(matrix, plane=None):
     return returnMatrix
 
 def stretchCurveVolume(curve, joints, nameInfo, main=None):
+    """
+    Stretch neck head
+    :param curve:
+    :param joints:
+    :param nameInfo:
+    :param main:
+    :return:
+    """
     curveInfo = pm.createNode('curveInfo', name='%s_curveInfo' % nameInfo)
     scaleCurveInfo = pm.createNode('multiplyDivide', name='%s_scaleCurve_curveInfo' % nameInfo)
     scaleCurveInfo.operation.set(2)  # divide
@@ -750,8 +758,10 @@ def stretchCurveVolume(curve, joints, nameInfo, main=None):
         plusMinusAverageToJoint.input1D[1].set(1)
 
         # connect to joint
-        plusMinusAverageToJoint.output1D.connect(joint.scaleY)
-        plusMinusAverageToJoint.output1D.connect(joint.scaleZ)
+        # connect if does not have connection
+        for scaleAxs in (['scaleY', 'scaleZ']):
+            if not joint.attr(scaleAxs).inputs():
+                plusMinusAverageToJoint.output1D.connect(joint.attr(scaleAxs))
 
 
 def connectAttributes(driver, driven, attributes, axis):
@@ -1040,7 +1050,7 @@ def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
 
     # copyDeformerWeights  ->  command for copy, mirror deformer weights
     # smooth weights
-    for i in range(4):  # review
+    for i in range(4):
         smoothDeformerWeights(str(wire))
 
     return wire, curve
@@ -1203,18 +1213,21 @@ def latticeBendDeformer(lattice, controller=None):
     scaleGrp = pm.group(empty=True, name='%s_scale_grp' % str(latticeTransform))
     scaleGrp.setTranslation(minPoint, 'world')
     scaleGrp.addChild(latticeTransform)
-
     # node connection
+    # distance between controller and base lattice
     distanceBettween = pm.createNode('distanceBetween')
     controller.worldMatrix.connect(distanceBettween.inMatrix1)
     referenceBase.worldMatrix.connect(distanceBettween.inMatrix2)
-    distance = distanceBettween.distance.get()  # get the distance
+    # distance between controller REFERENCE and base lattice
+    distanceReference = pm.createNode('distanceBetween')
+    referenceController.worldMatrix.connect(distanceReference.inMatrix1)
+    referenceBase.worldMatrix.connect(distanceReference.inMatrix2)
     # divide by the original length
     multiplyDivide = pm.createNode('multiplyDivide')
     multiplyDivide.operation.set(2)  # set to divide
-    # connect distance
+    # connect distances
     distanceBettween.distance.connect(multiplyDivide.input1X)
-    multiplyDivide.input2X.set(distance)
+    distanceReference.distance.connect(multiplyDivide.input2X)
     # get inverse
     inverse = pm.createNode('multiplyDivide')
     inverse.operation.set(2)  # divide
@@ -1224,5 +1237,8 @@ def latticeBendDeformer(lattice, controller=None):
     multiplyDivide.outputX.connect(scaleGrp.scaleY)
     for axis in ('X', 'Z'):
         inverse.outputX.connect(scaleGrp.attr('scale%s' % axis))
+
+    # lock and hide attr
+    lockAndHideAttr(controller, False, True, True)
 
     return [scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot]

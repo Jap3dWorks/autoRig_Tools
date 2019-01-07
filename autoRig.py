@@ -181,10 +181,6 @@ class RigAuto(object):
             spineController.addChild(spineDriver)
             self.spineIKControllerList.append(spineController)
 
-            # spine type controllers only translate, lock unused attr
-            if 'spine' in ctrType:
-                ARCore.lockAndHideAttr(spineController, False, True, True)
-
             # create FK controllers
             if n < 3:
                 # first fk controller bigger
@@ -214,10 +210,6 @@ class RigAuto(object):
         # create roots grp
         ARCore.createRoots(spineFKControllerList)
         spineControllerRootsList = ARCore.createRoots(self.spineIKControllerList)
-
-        # once created roots, we can freeze and hide attributes. if not, it can be unstable
-        for neckHeadIKCtr in spineFKControllerList[1:]:
-            ARCore.lockAndHideAttr(neckHeadIKCtr, True, False, False)
 
         # create points on curve that will drive the joints
         # this is like the main joint.
@@ -320,6 +312,12 @@ class RigAuto(object):
 
         # stretch TODO: print spineJoints list
         ARCore.stretchCurveVolume(spineCurve, spineJoints, '%s_%s' % (self.chName, zone), self.mainCtr)
+
+        # lock and hide attributes
+        ARCore.lockAndHideAttr(self.spineIKControllerList[1:-1], False, True, True)  # ik Ctr, no hips and chest
+        ARCore.lockAndHideAttr(spineFKControllerList[1:], True, False, True)  # fk controller list, no hips
+        ARCore.lockAndHideAttr(spineFKControllerList[0], False, False, True)  # fk controller hips
+        ARCore.lockAndHideAttr([self.spineIKControllerList[0], self.spineIKControllerList[-1]], False, False, True)  # ik Ctr, hips and chest
 
         # function for create extra content
         for func in funcs:
@@ -424,11 +422,6 @@ class RigAuto(object):
         # create roots grp
         neckHeadFKCtrRoots = ARCore.createRoots(neckHeadFKCtrList)
         neckHeadIKCtrRoots = ARCore.createRoots(self.neckHeadIKCtrList)
-        # once created roots, we can freeze and hide attributes. if not, it can be unstable
-        for neckHeadFKCtr in neckHeadFKCtrList:
-            ARCore.lockAndHideAttr(neckHeadFKCtr, True, False, False)
-        # lock and hide neck attr, it's here because we have only one
-        ARCore.lockAndHideAttr(self.neckHeadIKCtrList[0], False, True, True)
 
         # head orient auto, isolate
         # head orient neck grp
@@ -552,17 +545,24 @@ class RigAuto(object):
             # review: create parent constraints, once drivers have been created, if not, all flip
             if re.match('.*head.*', str(joint)):
                 # head joint, with point to driver, and orient to controller
-                pm.pointConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=False, name='%s_drv_%s_%s_1_pointConstraint' % (self.chName, zone, jointNameSplit))
+                pm.pointConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=False, name='%s_%s_%s_1_drv_pointConstraint' % (self.chName, zone, jointNameSplit))
                 # orient to controller
                 self.neckHeadIKCtrList[-1].rename(str(joint).replace('joint', 'ctr'))  # rename, useful for snap proxy model
-                pm.orientConstraint(self.neckHeadIKCtrList[-1], joint, maintainOffset=True, name='%s_drv_%s_%s_1_orientConstraint' % (self.chName, zone, jointNameSplit))
+                pm.orientConstraint(self.neckHeadIKCtrList[-1], joint, maintainOffset=True, name='%s_%s_%s_1_drv_orientConstraint' % (self.chName, zone, jointNameSplit))
+                # connect scales
+                ARCore.connectAttributes(self.neckHeadIKCtrList[-1], joint, ['scale'], 'XYZ')
 
             else:
                 self.neckHeadJointDriverList[n].rename(str(joint).replace('joint', 'main'))  # rename, useful for snap proxy model
-                pm.parentConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=True, name='%s_drv_%s_%s_1_parentConstraint' % (self.chName, zone, jointNameSplit))
+                pm.parentConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=True, name='%s_%s_%s_1_drv_parentConstraint' % (self.chName, zone, jointNameSplit))
 
         # stretch
         ARCore.stretchCurveVolume(neckHeadCurve, neckHeadJoints[:-1], '%s_%s' % (self.chName, zone), self.mainCtr)
+
+        # freeze and hide attributes.
+        ARCore.lockAndHideAttr(neckHeadFKCtrList, False, False, True)
+        # lock and hide neck attr, it's here because we have only one
+        ARCore.lockAndHideAttr(self.neckHeadIKCtrList[0], False, True, True)
 
         # extra functions
         for func in funcs:
@@ -794,8 +794,6 @@ class RigAuto(object):
             # review: visibility shape
             self.plusMinusIkFk.output1D.connect(self.ikFk_FkControllersList[i].visibility)
 
-            ARCore.lockAndHideAttr(self.ikFk_FkControllersList[i], True, False, False)
-
         # twist joints bending bones connect, if curve wire detected, no use bendingJoints
         # TODO: control by twist or wire?
         if ikFkTwistList:
@@ -818,6 +816,12 @@ class RigAuto(object):
         self.ikFkshape.ikFk.connect(ikFkPoleController.visibility)
         self.ikFkshape.ikFk.connect(self.ikFk_IkControl.visibility)
         self.ikFk_IkControl.addChild(self.ikFkshape, add=True, s=True)
+
+        # lock and hide attributes
+        # lock and hide ik ctr scale attr
+        ARCore.lockAndHideAttr(self.ikFk_IkControl, False, False, True)
+        ARCore.lockAndHideAttr(self.ikFk_FkControllersList, True, False, True)
+        ARCore.lockAndHideAttr(ikFkPoleController, False, True, True)
 
         # function for create foots, Review: maybe here another to create hands
         for func in funcs:
@@ -1072,10 +1076,6 @@ class RigAuto(object):
                     for axis in ('X', 'Y', 'Z'):
                         toesGeneralCtrIkOrFk.attr('rotate%s' % axis).connect(iAuto.attr('rotate%s' % axis))
 
-        # lock and hide attributes. after root creation
-        ARCore.lockAndHideAttr(footIkControllerList[1:], True, False, True)
-        ARCore.lockAndHideAttr(toesIkControllerList[-1], True, False, True)
-
         # footRollAuto __ rest points__
         # ik ctr autos
         for i, autoGrp in enumerate(footIkAuto[1:]):
@@ -1151,8 +1151,6 @@ class RigAuto(object):
             else:
                 pm.orientConstraint(footFkControllerList[i], mainJoint, maintainOffset=True, name='%s_%s_%s_%s_mainBlending_orientConstraint' % (self.chName, controllerName, zoneB, self.lastSide))
 
-            ARCore.lockAndHideAttr(footFkControllerList[i], True, False, False)
-
             # connect to deform skeleton
             mainJoint.rename(str(footJoints[i]).replace('joint', 'main'))  # rename, useful for snap proxy model
             pm.orientConstraint(mainJoint, footJoints[i], maintainOffset=False, name='%s_%s_%s_%s_joint_orientConstraint' % (self.chName, controllerName, zoneB, self.lastSide))
@@ -1174,8 +1172,18 @@ class RigAuto(object):
             pm.orientConstraint(mainJoint, toesJoints[i], maintainOffset=False, name='%s_%s_%s_%s_joint_orientConstraint' % (self.chName, controllerName, self.lastZone, self.lastSide))
             pm.pointConstraint(mainJoint, toesJoints[i], maintainOffset=False, name='%s_%s_%s_%s_joint_pointConstraint' % (self.chName, controllerName, self.lastZone, self.lastSide))
 
+        # total controllers
+        footTotalFkControllers=footFkControllerList + toesFkControllerList
 
-        return footIkControllerList + toesIkControllerList, footFkControllerList + toesFkControllerList
+        # lock and hide attributes. after root creation
+        ARCore.lockAndHideAttr(footTotalFkControllers, True, False, True)   # all fk controllers
+        #ARCore.lockAndHideAttr(toesIkControllerList[-1], True, False, True)
+        ARCore.lockAndHideAttr(footIkControllerList[0], False, False, True)  # ik ctr foot
+        ARCore.lockAndHideAttr(footIkControllerList[1:], True, False, True)  # walk ik controllers
+        ARCore.lockAndHideAttr(toesIkControllerList, True, False, True)  # toes ik controllers
+
+
+        return footIkControllerList + toesIkControllerList, footTotalFkControllers
 
     def hand_auto(self, zones=('hand', 'finger'), planeAlign=None, *funcs):
         """
@@ -1509,6 +1517,8 @@ class RigAuto(object):
                 controller.addChild(trn)  # child of the controller
                 # create Roots
                 ARCore.createRoots([controller])
+                # lock and hide attributes
+                ARCore.lockAndHideAttr(controller, False, True, True)
 
         # curves to no xform grp
         self.noXformGrp.addChild(curve.getTransform())
@@ -1573,16 +1583,5 @@ class RigAuto(object):
             controller: pymel transformNode
             transformMatrix: stored position
         """
-        controller, transformMatrix = ctrSaveLoadToJson.ctrLoadJson(controllerType, self.chName, self.path, s, colorIndex)
-        controller = pm.PyNode(controller)
-        controller.rename(name)
-
-        shapes = controller.listRelatives(s=True)
-        # hide shape attr
-        for shape in shapes:
-            for attr in ('aiRenderCurve', 'aiCurveWidth', 'aiSampleRate', 'aiCurveShaderR', 'aiCurveShaderG', 'aiCurveShaderB'):
-                pm.setAttr('%s.%s' % (str(shape), attr), channelBox=False, keyable=False)
-
-        pm.xform(controller, ws=True, m=transformMatrix)
-        logger.debug('controller %s' % controller)
+        controller = ARCore.createController(name, controllerType, self.chName, self.path, s, colorIndex)
         return controller

@@ -33,3 +33,21 @@ def akonaRigA(name='akona', path='D:\_docs\_Animum\Akona'):
                                 lambda: akonaRig.hand_auto(('hand', 'finger'), None),
                                 lambda: akonaRig.clavicle_auto('clavicle'),
                                 lambda: akonaRig.ikFkChain_wire('akona_body_mesh'))
+
+    # list all joints of scene, and set its draw attribute to none
+    hideElements = cmds.ls('%s*' % name, type='joint')
+    for element in hideElements:
+        cmds.setAttr('%s.drawStyle' % element, 2)
+    # hide ik handles
+    hideElements = cmds.ls(type='ikHandle')
+    for element in hideElements:
+        cmds.setAttr('%s.visibility' % element, False)
+    # hide curves
+    hideElements = cmds.ls(type='nurbsCurve')
+    for element in hideElements:
+        if not 'ctr' in element:
+            cmds.setAttr('%s.visibility' % element, False)
+
+    # ctr layer
+    controllers = cmds.ls('*_ctr')
+    cmds.sets(controllers, name='%s_ctr' % name)
