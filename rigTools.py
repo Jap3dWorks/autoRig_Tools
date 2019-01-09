@@ -2,6 +2,7 @@
 
 from maya import cmds
 from maya import OpenMaya
+from maya import OpenMayaAnim
 from maya import mel
 import re
 import pymel.core as pm
@@ -902,6 +903,141 @@ class CopyDeforms(object):
         pm.delete(targetBShapes)
 
         return BlendShapeNode, BSNames
+
+    @staticmethod
+    def copyClusterWeights(deformer, mesh2):
+
+        # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
+        # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_set_html  # mfnSet
+        # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_weight_geometry_filter_html  # geometryFilter
+        """
+        copy cluster weights between meshes
+        :param mesh2: mesh shape where copy weights
+        :return:
+        """
+        # util
+        util = OpenMaya.MScriptUtil()
+
+        # get cluster
+        mSelection = OpenMaya.MSelectionList()
+        mSelection.add(deformer)
+        mSelection.add(mesh2)
+        # deformer
+        deformerMObject = OpenMaya.MObject()
+        mSelection.getDependNode(0, deformerMObject)
+
+        # weight mfn
+        weightGeometryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
+        membersSelList = OpenMaya.MSelectionList()
+        fnSet = OpenMaya.MFnSet(weightGeometryFilter.deformerSet())  # set components affected
+        fnSet.getMembers(membersSelList, False)  # add to selection list
+        dagPathComponents = OpenMaya.MDagPath()
+        components = OpenMaya.MObject()
+        membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
+        # get original weights
+        originalWeight = OpenMaya.MFloatArray()
+        weightGeometryFilter.getWeights(0, components, originalWeight)  # review documentation
+
+        # get target mfn and all point positions
+        targetDPath = OpenMaya.MDagPath()
+        mSelection.getDagPath(1, targetDPath)
+        if targetDPath.apiType() is OpenMaya.MFn.kTransform:
+            targetDPath.extendToShape()  # if is ktransform type. get the shape
+        # target It
+        targetIt = OpenMaya.MItMeshVertex(targetDPath)
+
+        # deformer vertex iterator
+        sourceVertIt = OpenMaya.MItMeshVertex(dagPathComponents, components)
+        sourceMFn = OpenMaya.MFnMesh(dagPathComponents)
+        # list index on set fn
+        sourceVertexId = OpenMaya.MIntArray()
+        while not sourceVertIt.isDone():
+            sourceVertexId.append(sourceVertIt.index())
+
+            sourceVertIt.next()
+        sourceVertIt.reset()
+        logger.debug('source vertex id: %s' % sourceVertexId)
+
+        targetDeformVId = OpenMaya.MIntArray()
+        targetSelList = OpenMaya.MSelectionList()
+        newWeights = OpenMaya.MFloatArray()
+        lastLength = 0  # useful to find valid vertex
+        # closest vertex from target to source
+        # review, optimize
+        while not targetIt.isDone():
+            TVid = targetIt.index()
+            TargetPoint = targetIt.position()
+            closestPoint = OpenMaya.MPoint()
+            ptr = util.asIntPtr()
+            sourceMFn.getClosestPoint(TargetPoint, closestPoint, OpenMaya.MSpace.kObject, ptr)
+            polyId = util.getInt(ptr)
+
+            # get vertices from face id
+            vertexId = OpenMaya.MIntArray()
+            # gives the vertex in non clock direction
+            sourceMFn.getPolygonVertices(polyId, vertexId)
+            vertexLength = vertexId.length()
+            totalWeight = 0
+            # iterate over the face vertex
+            for i, Vid in enumerate(vertexId):
+                if Vid in sourceVertexId:
+                    # calculate relative weight.
+                    # get distance from vertex.
+                    DistPoint = OpenMaya.MPoint()
+                    sourceMFn.getPoint(Vid, DistPoint)  # get weighted vertex position
+                    DistVector = OpenMaya.MVector(DistPoint - closestPoint)
+                    vectorA = OpenMaya.MPoint()  # vectorA
+                    sourceMFn.getPoint(vertexId[i-1], vectorA)
+                    vectorB = OpenMaya.MPoint()  # vertorB
+                    sourceMFn.getPoint(vertexId[(i+1) % vertexLength], vectorB)
+                    # contruct baricentric vectors
+                    # documentation: http://blackpawn.com/texts/pointinpoly/
+                    vectorA = OpenMaya.MVector(vectorA - DistVector)
+                    vectorB = OpenMaya.MVector(vectorB - DistVector)
+                    #denimator
+                    denom = ((vectorA*vectorA)*(vectorB*vectorB)-(vectorA*vectorB)*(vectorB*vectorA))
+                    # u and V
+
+                    u = ((vectorB*vectorB)*(DistVector*vectorA)-(vectorB*vectorA)*(DistVector*vectorB))/denom
+                    v = ((vectorA*vectorA)*(DistVector*vectorB)-(vectorA*vectorB)*(DistVector*vectorA))/denom
+                    print (Vid, vertexId[i-1], vertexId[(i+1) % vertexLength])
+                    print(u,' ', v)
+                    # get wheigts
+                    weightIndex = list(sourceVertexId).index(Vid)  # get the vertex list index, valid for the weight list
+                    sourceWeight = originalWeight[weightIndex]  # get weight value from the list
+                    # be careful with neative weight. maybe min operator
+                    totalWeight += ((sourceWeight*(1-u)+sourceWeight*(1-v))) / 2
+
+                    # save valid vertex index. only once.
+                    if not TVid in targetDeformVId:
+                        targetDeformVId.append(TVid)
+                        # save components in a selection list. this way we can add it to our set
+                        targetSelList.add(targetDPath, targetIt.currentItem())
+
+            # now calculate and assign weight value
+            newLength = targetDeformVId.length()
+            if lastLength < newLength:
+                newWeights.append(totalWeight)
+                lastLength = newLength
+
+            targetIt.next()
+
+        # add to mfnSet
+        fnSet.addMembers(targetSelList)
+        PaintSelList = OpenMaya.MSelectionList()
+        fnSet.getMembers(PaintSelList, False)
+
+        # calculate weights
+        # get from selection list
+        components = OpenMaya.MObject()
+        targetNewWDPath = OpenMaya.MDagPath()
+        for i in range(PaintSelList.length()):
+            # check we have desired dagpath
+            PaintSelList.getDagPath(i, targetNewWDPath, components)
+            if targetNewWDPath.partialPathName() == targetDPath.partialPathName():
+                break
+        print newWeights
+        weightGeometryFilter.setWeight(targetNewWDPath, components, newWeights)
 
 
 class PickerTools(object):
