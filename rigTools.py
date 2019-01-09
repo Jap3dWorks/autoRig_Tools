@@ -906,7 +906,6 @@ class CopyDeforms(object):
 
     @staticmethod
     def copyClusterWeights(deformer, mesh2):
-
         # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
         # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_set_html  # mfnSet
         # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_weight_geometry_filter_html  # geometryFilter
@@ -953,8 +952,8 @@ class CopyDeforms(object):
         sourceVertexId = OpenMaya.MIntArray()
         while not sourceVertIt.isDone():
             sourceVertexId.append(sourceVertIt.index())
-
             sourceVertIt.next()
+
         sourceVertIt.reset()
         logger.debug('source vertex id: %s' % sourceVertexId)
 
@@ -977,36 +976,47 @@ class CopyDeforms(object):
             # gives the vertex in non clock direction
             sourceMFn.getPolygonVertices(polyId, vertexId)
             vertexLength = vertexId.length()
+            weightList=[]
+            totalArea = 0
+            areaList=[]
             totalWeight = 0
+            # polygonArea
+            # sourceVertIt.setIndex(polyId)
             # iterate over the face vertex
-            for i, Vid in enumerate(vertexId):
-                if Vid in sourceVertexId:
+            # check if any vertex is in the list of source vertex
+            # TODO: review calculations, and try to optimize
+            if set(vertexId) & set(sourceVertexId):
+                for i, Vid in enumerate(vertexId):
+                    # check first if any vertex is in the list
                     # calculate relative weight.
                     # get distance from vertex.
                     DistPoint = OpenMaya.MPoint()
                     sourceMFn.getPoint(Vid, DistPoint)  # get weighted vertex position
-                    DistVector = OpenMaya.MVector(DistPoint - closestPoint)
+                    DistVector = OpenMaya.MVector(closestPoint - DistPoint)
                     vectorA = OpenMaya.MPoint()  # vectorA
                     sourceMFn.getPoint(vertexId[i-1], vectorA)
                     vectorB = OpenMaya.MPoint()  # vertorB
                     sourceMFn.getPoint(vertexId[(i+1) % vertexLength], vectorB)
                     # contruct baricentric vectors
                     # documentation: http://blackpawn.com/texts/pointinpoly/
-                    vectorA = OpenMaya.MVector(vectorA - DistVector)
-                    vectorB = OpenMaya.MVector(vectorB - DistVector)
-                    #denimator
+                    vectorA = OpenMaya.MVector(vectorA - DistPoint)
+                    vectorB = OpenMaya.MVector(vectorB - DistPoint)
+                    #denominator
                     denom = ((vectorA*vectorA)*(vectorB*vectorB)-(vectorA*vectorB)*(vectorB*vectorA))
                     # u and V
-
                     u = ((vectorB*vectorB)*(DistVector*vectorA)-(vectorB*vectorA)*(DistVector*vectorB))/denom
                     v = ((vectorA*vectorA)*(DistVector*vectorB)-(vectorA*vectorB)*(DistVector*vectorA))/denom
-                    print (Vid, vertexId[i-1], vertexId[(i+1) % vertexLength])
-                    print(u,' ', v)
-                    # get wheigts
-                    weightIndex = list(sourceVertexId).index(Vid)  # get the vertex list index, valid for the weight list
-                    sourceWeight = originalWeight[weightIndex]  # get weight value from the list
-                    # be careful with neative weight. maybe min operator
-                    totalWeight += ((sourceWeight*(1-u)+sourceWeight*(1-v))) / 2
+                    areaVector = (vectorA*(1-u) ^ vectorB*(1-v)).length()
+                    totalArea += areaVector
+                    areaList.append(areaVector)
+
+                    # get wheights
+                    if Vid in sourceVertexId:
+                        weightIndex = list(sourceVertexId).index(Vid)  # get the vertex list index, valid for the weight list
+                        sourceWeight = originalWeight[weightIndex]  # get weight value from the list
+                    else:
+                        sourceWeight = 0
+                    weightList.append(sourceWeight)
 
                     # save valid vertex index. only once.
                     if not TVid in targetDeformVId:
@@ -1017,7 +1027,11 @@ class CopyDeforms(object):
             # now calculate and assign weight value
             newLength = targetDeformVId.length()
             if lastLength < newLength:
-                newWeights.append(totalWeight)
+                weightTarget = 0
+                for i, area in enumerate(areaList):
+                    weightTarget += (area/totalArea)*weightList[i]
+
+                newWeights.append(weightTarget)
                 lastLength = newLength
 
             targetIt.next()
