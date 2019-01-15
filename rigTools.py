@@ -584,9 +584,6 @@ class PSDUtils(object):
             PSDUtils.connectBlendShape(blendshapeNode, target)
 
 
-
-
-
 ## Proxies ##
 # TODO: make class
 #UI
@@ -796,8 +793,8 @@ class CopyDeforms(object):
         skinedMeshShape = skinedMesh.getShape()
 
         # loop since a skin cluster are found
-        skinCluster = pm.listConnections(skinedMeshShape, d=True, t='skinCluster')[0]
-        skinCluster = pm.PyNode(skinCluster)
+        skinCluster = pm.listHistory(skinedMeshShape, type='skinCluster')[0]
+        # skinCluster = pm.PyNode(skinCluster)
         skinInf = skinCluster.maxInfluences.get()
 
         # joint list
@@ -905,13 +902,14 @@ class CopyDeforms(object):
         return BlendShapeNode, BSNames
 
     @staticmethod
-    def copyClusterWeights(deformer, mesh2):
+    def copyClusterWeights(deformer, mesh):
         # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
         # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_set_html  # mfnSet
         # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_weight_geometry_filter_html  # geometryFilter
         """
         copy cluster weights between meshes
-        :param mesh2: mesh shape where copy weights
+        :param deformer(str): cluster deformer name
+        :param mesh2(str): mesh shape where copy weights
         :return:
         """
         # util
@@ -920,7 +918,7 @@ class CopyDeforms(object):
         # get cluster
         mSelection = OpenMaya.MSelectionList()
         mSelection.add(deformer)
-        mSelection.add(mesh2)
+        mSelection.add(mesh)
         # deformer
         deformerMObject = OpenMaya.MObject()
         mSelection.getDependNode(0, deformerMObject)

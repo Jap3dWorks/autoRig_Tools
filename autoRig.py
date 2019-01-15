@@ -1424,9 +1424,13 @@ class RigAuto(object):
             pm.pointConstraint(clavicleMainList[i], joint, maintainOffset=False)
             pm.orientConstraint(clavicleMainList[i], joint, maintainOffset=True)
 
+        # save data
+        zoneSide = '%s_%s' % (zone, self.lastSide)
+        #self.ikControllers[zone] = self.neckHeadIKCtrList
+        self.fkControllers[zoneSide] = clavicleController
         return [], clavicleMainList
 
-    def addCluster(self, cluster, parent, controllerType):
+    def addCluster(self, cluster, parent, controllerType, controllerSize=1.0):
         """
         Take a cluster or create it, move it to the controller system, create a controller and vinculate
         :arg: cluster(str or pm): name of the cluster transform node
@@ -1435,6 +1439,10 @@ class RigAuto(object):
         # cluster var type
         if isinstance(cluster, str):
             cluster = pm.PyNode(cluster)
+        # parent var type
+        if isinstance(parent, str):
+            parent = pm.PyNode(parent)
+
         clusterMatrix = pm.xform(cluster, ws=True, m=True, q=True)
 
         # look for cluster root
@@ -1462,7 +1470,7 @@ class RigAuto(object):
         parent.addChild(clusterRoot)
 
         # createController
-        controller = self.create_controller('%s_ctr' % str(cluster), controllerType, 1.0, 24)
+        controller = self.create_controller('%s_ctr' % str(cluster), controllerType, controllerSize, 24)
         # align with cluster, we need to query world space pivot
         controller.setTranslation(cluster.getPivots(ws=True)[0], 'world')
         #pm.xform(controller, ws=True, m=clusterMatrix)
@@ -1572,6 +1580,217 @@ class RigAuto(object):
         latticeTransform.visibility.set(False)
 
         return [], []
+
+    def PSSkirt_auto(self, zone, side, drivers, parent, offset=0.15, falloff=1, range=75):
+        """
+
+        :param zone:
+        :param side:
+        :param drivers:
+        :param parent:
+        :param offset:
+        :param falloff:
+        :param range:
+        :return:
+        """
+        skirtJoints = [point for point in pm.ls() if re.match('^%s.*(%s).*%s.*joint$' % (self.chName, zone, side), str(point))]
+
+        # get drivers positions
+        driversPos = []
+        for driver in drivers:
+            driversPos.append(pm.xform(driver, ws=True, q=True, t=True))
+        # arrange lists by hierarchy
+        skirtJointsArrange = ARCore.arrangeListByHierarchy(skirtJoints)
+
+        # create controllers
+        fkControllerList = []  # fk controllers
+        pointControllers = []  # point controllers
+        for chainJoints in skirtJointsArrange:
+            fkChainController=[]
+            pointChainController=[]
+            for joint in chainJoints:
+                controller = self.create_controller(str(joint).replace('joint', 'ctr'), 'squareFk', 1, 11)
+                pm.xform(controller, ws=True, m=pm.xform(joint, ws=True, q=True, m=True))
+                # construct hierarchy
+                if fkChainController:
+                    fkChainController[-1].addChild(controller)
+                else:
+                    parent.addChild(controller)  # if first, parent to parent, hips
+                # append controller
+                fkChainController.append(controller)
+
+                # create point ctr
+                pointCtr = self.create_controller(str(controller).replace('ctr', 'point_ctr'), 'pole', .5, 7)
+                pm.xform(pointCtr, ws=True, m=pm.xform(controller, ws=True, q=True, m=True))
+                # make shapes visibles review
+
+                # parent to controller
+                controller.addChild(pointCtr)
+                # append point ctr
+                pointChainController.append(pointCtr)
+
+            # append fk list
+            fkControllerList.append(fkChainController)
+            pointControllers.append(pointChainController)
+
+        # create roots
+        rootsControllerList = []
+        for fkCtrChain in  fkControllerList:
+            ARCore.createRoots(fkCtrChain)
+            rootsControllers = ARCore.createRoots(fkCtrChain, 'auto')
+            rootsControllerList.append(rootsControllers)
+
+        # create driven Vectors
+        drivenObj=[]
+        for joints in skirtJointsArrange:
+            drivVec = pm.group(empty=True)
+            pm.xform(drivVec, ws=True, m=pm.xform(joints[0], q=True, ws=True, m=True))
+            drivVecPos = drivVec.getTranslation('world')
+            drivVec.setTranslation([drivVecPos[0], driversPos[0][1], drivVecPos[2]], 'world')
+            # point constraint, Review performance point vs matrix dot product
+            parent.addChild(drivVec)
+            drivenObj.append(drivVec)
+
+        # create dot space
+        driversRangeList=[]  # outputs of the dot system
+        for driver in drivers:
+            driverVectorName = '%s_driverVector' % (str(driver))
+            try:
+                # find a previous driver node created for the driver
+                driverVector = pm.PyNode(driverVectorName)
+            except:
+                # if not, create
+                # and use the object space translation as vector, normalized
+                # to get the driver vector, we query childs position
+                driverPM = pm.PyNode(driver)  # create pm node
+                driverVectorGrp = pm.group(empty=True, name='%s_vectorGrp' % str(driverPM))
+                driverMatrix = pm.xform(driverPM, q=True, m=True, ws=True)
+                driverMatrix = ARCore.orientToPlane(driverMatrix, 'zx')
+                pm.xform(driverVectorGrp, ws=True, m=driverMatrix)
+
+                # orient constraint
+                pm.orientConstraint(driverPM, driverVectorGrp, maintainOffset=True)
+                # get vector
+                childDriver = driverPM.childAtIndex(0).getTranslation('object')
+                childDriver = pm.datatypes.Vector(childDriver)
+                driverVector = ARCore.getVectorFromMatrix(driverVectorGrp, childDriver)
+                driverVector.rename(driverVectorName)
+
+                # parent
+                parent.addChild(driverVectorGrp)
+
+            rangeNodesList = []
+            for i, driven in enumerate(drivenObj):
+                drivenVector = ARCore.getVectorBetweenTransforms(driver, driven)
+                dotPS = ARCore.dotBasedPS(driverVector, drivenVector)
+                # offset
+                offsetNode = pm.createNode('addDoubleLinear')
+                offsetNode.input2.set(offset)  # offset value
+                dotPS.outputX.connect(offsetNode.input1)
+                # create condition
+                condition = pm.createNode('condition')
+                condition.operation.set(2)  # greater than
+                condition.secondTerm.set(0)
+                offsetNode.output.connect(condition.colorIfTrueR)
+                offsetNode.output.connect(condition.firstTerm)
+                for axis in ('R', 'G', 'B'):
+                    condition.attr('colorIfFalse%s' % axis).set(0)
+
+                # power to control fallof
+                power = pm.createNode('multiplyDivide')
+                power.operation.set(3)  # set to power
+                condition.outColorR.connect(power.input1X)
+                power.input2X.set(falloff)  # Fallof create here some controller
+                # multiply by the maximum value to config the range
+                rangeMult = pm.createNode('multDoubleLinear')
+                power.outputX.connect(rangeMult.input1)
+                rangeMult.input2.set(range)  # range
+                # auto multiplier
+                multiplier = pm.createNode('multDoubleLinear')
+                rangeMult.output.connect(multiplier.input1)
+                multiplier.input2.set(1)
+
+                # append
+                rangeNodesList.append(multiplier)
+
+            driversRangeList.append(rangeNodesList)
+
+
+        if len(driversRangeList) == 1:
+            for i, rootCtr in enumerate(rootsControllerList):
+                # connect to skirt
+                driversRangeList[0][i].output.connect(rootCtr[0].rotateZ)  # attribute variable?
+
+        elif len(driversRangeList) == 2:
+            for i, rootCtr in enumerate(rootsControllerList):
+                # create blend color
+                condition = pm.createNode('condition')
+                condition.operation.set(2)  # greater than
+                # connect condition
+                driversRangeList[0][i].output.connect(condition.firstTerm)
+                driversRangeList[0][i].output.connect(condition.colorIfTrueR)
+                # second driver
+                driversRangeList[1][i].output.connect(condition.secondTerm)
+                driversRangeList[1][i].output.connect(condition.colorIfFalseR)
+                # connect to transform
+                condition.outColorR.connect(rootCtr[0].rotateZ)
+
+
+        # view controller attribute and auto attribute
+        # auto attribute
+        if not parent.hasAttr('skirtAuto'):
+            # create attr
+            pm.addAttr(parent, longName='skirtAuto', shortName='skirtAuto', minValue=0.0,
+                       type='float', defaultValue=1.0, k=True)
+        # connect node
+        for rangeNodesList in driversRangeList:
+            for multNode in rangeNodesList:
+                parent.skirtAuto.connect(multNode.input2)
+
+        # connect visibility
+        if not parent.hasAttr('skirtControllers'):
+            # create attr
+            pm.addAttr(parent, longName='skirtControllers', shortName='skirtControllers',
+                       type='bool', defaultValue=True, k=False)
+            pm.setAttr('%s.skirtControllers' % str(parent), channelBox=True)
+        # connect node
+        for fkChainctr in fkControllerList:
+            for fkCtr in fkChainctr:
+                parent.skirtControllers.connect(fkCtr.visibility)
+
+        # conenct to joints
+        for i, pointChanCtr in enumerate(pointControllers):
+            for j, pointCtr in enumerate(pointChanCtr):
+                pm.pointConstraint(pointCtr, skirtJointsArrange[i][j], maintainOffset=False)
+                pm.orientConstraint(pointCtr, skirtJointsArrange[i][j], maintainOffset=False)
+
+
+    def point_auto(self, zone, parent):
+        """
+        :param zone:
+        :param parent:
+        :return:
+        """
+        pointJoints = [point for point in pm.ls() if re.match('^%s.*%s.*.*joint$' % (self.chName, zone), str(point))]
+
+        # create controllers
+        pointControllers = []
+        for joint in pointJoints:
+            controller = self.create_controller(str(joint).replace('joint', 'ctr'), 'pole', 2, 10)
+            pm.xform(controller, ws=True, m=pm.xform(joint, ws=True, q=True, m=True))
+            # hierarchy
+            parent.addChild(controller)
+            pointControllers.append(controller)
+
+        # roots
+        ARCore.createRoots(pointControllers)
+
+        # conenct to joints
+        for i, joint in enumerate(pointJoints):
+            pm.pointConstraint(pointControllers[i], joint, maintainOffset=False)
+            pm.orientConstraint(pointControllers[i], joint, maintainOffset=False)
+            ARCore.connectAttributes(pointControllers[i], joint,['scale'], 'XYZ')
+
 
 
     def create_controller(self, name, controllerType, s=1.0, colorIndex=4):

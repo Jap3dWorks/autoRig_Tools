@@ -659,9 +659,10 @@ def snapCurveToPoints(points, curve, iterations=4, precision=0.05):
 
     mfnNurbsCurve.updateCurve()
 
-def orientToPlane(matrix, plane=None):
+def orientToPlane(matrix, plane=None, respectAxis=None):
     """
-    Conserve the general orient of a matrixTransform, but aligned to a plane
+    Conserve the general orient of a matrixTransform, but aligned to a plane.
+    option to select the respect axis
     Args:
         controller(pm.transform): transform matrix
         plane(string): zx, xy, yz  lower case, first vector is the prefered vector
@@ -669,12 +670,11 @@ def orientToPlane(matrix, plane=None):
     if not plane:
         logger.info('no plane')
         return matrix
-
     elif len(plane) > 2:
         logger.info('insert a valid plane')
         return matrix
 
-    axisList = ['x', 'y', 'z']
+    axisList = 'xyz'
 
     vectors = {}
     vIndex = 0
@@ -683,30 +683,49 @@ def orientToPlane(matrix, plane=None):
         vectors[axis] = OpenMaya.MVector(matrix[vIndex], matrix[vIndex+1], matrix[vIndex+2])
         vIndex += 4
 
-    # find resetable axis
-    resetAxis = ''.join(axisList)  # convert axis list in axis string
-    logger.debug('axisStr: %s' % resetAxis)
+    # compare dot products, and find the nearest vector to plane vector
+    planeVector = [0 if axis in plane else 1 for axis in axisList]  # plane vector (1,0,0) or (0,1,0) or (0,0,1)
+    planeVector = OpenMaya.MVector(planeVector[0], planeVector[1], planeVector[2])
+    dotValue = None
+    respectVector=None
+    for axis in axisList:
+        newDot = abs(planeVector * vectors[axis])
+        if dotValue < newDot:
+            dotValue = newDot
+            respectVector = axis
+
+    # find resettable axis
+    resetAxis = axisList  # convert axis list in axis string
     for axis in plane:
         resetAxis = resetAxis.replace(axis, '')
-    logger.debug('reset index: %s' % resetAxis)
 
     # reset the axis
+    resetPlane=''
     for key, vector in vectors.iteritems():
-        if key == resetAxis:  # this is not necessary to reset
+        if key == respectVector:  # this is not necessary to reset
             continue
         setattr(vector, resetAxis, 0)
         vector.normalize()
+        resetPlane += key  # edited vectors, projected over the plane
 
-    vectors[resetAxis] = vectors[plane[0]] ^ vectors[plane[1]]
-    vectors[resetAxis].normalize()
-    vectors[plane[1]] = vectors[resetAxis] ^ vectors[plane[0]]
-    vectors[plane[1]].normalize()
-
+    # reconstruct matrix
+    # use comapreVectors to avoid negative scales, comparing dot product
+    compareVector = OpenMaya.MVector(vectors[respectVector])
+    vectors[respectVector] = vectors[resetPlane[0]] ^ vectors[resetPlane[1]]
+    if vectors[respectVector] * compareVector < 0:  # if dot negative, it will get as result a negative scale
+        vectors[respectVector] = vectors[resetPlane[1]] ^ vectors[resetPlane[0]]
+    vectors[respectVector].normalize()  # normalize
+    compareVector = OpenMaya.MVector(vectors[resetPlane[1]])
+    vectors[resetPlane[1]] = vectors[respectVector] ^ vectors[resetPlane[0]]
+    if compareVector * vectors[resetPlane[1]] < 0:
+        vectors[resetPlane[1]] = vectors[resetPlane[0]] ^ vectors[respectVector]
+    vectors[resetPlane[1]].normalize()  # normalize
 
     returnMatrix = [vectors[axisList[0]].x, vectors[axisList[0]].y, vectors[axisList[0]].z, matrix[3], vectors[axisList[1]].x, vectors[axisList[1]].y, vectors[axisList[1]].z, matrix[7],
                 vectors[axisList[2]].x, vectors[axisList[2]].y, vectors[axisList[2]].z, matrix[11], matrix[12], matrix[13], matrix[14], matrix[15]]
 
     return returnMatrix
+
 
 def stretchCurveVolume(curve, joints, nameInfo, main=None):
     """
@@ -1242,3 +1261,164 @@ def latticeBendDeformer(lattice, controller=None):
     lockAndHideAttr(controller, False, True, True)
 
     return [scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot]
+
+def dotBasedPS(driverVector, drivenVector):
+    """
+    Create a conection based on a space deform to drive attributes
+    :param driverVector(str or pm): VectorProduct node with driver vector info
+    :param drivenVector(str or pm): Transform node that will be used as a reference to calculate the dot product
+    :param attributes(str): attributes that will be drived
+    :return psDot: vector product node with dot product
+    """
+    # get ps dot
+    psDot = pm.createNode('vectorProduct')
+    psDot.operation.set(1)
+    driverVector.output.connect(psDot.input2)  # connect driver vector
+    drivenVector.output.connect(psDot.input1)  # connect driven vector
+
+    return psDot
+
+
+def getVectorBetweenTransforms(point1, point2, normalized=True):
+    """
+    Get the vector defined by two transform nodes. independent of the hierarchy
+    the base of this method is set a vectorProduct node as dotMatrixProduct. and
+    operate over a vector (0,0,0), this way we get the world space translation.
+    :param point1: origin of the vector
+    :param point2: end of the vector
+    :param normalized: normalized or not
+    :return:
+    """
+    # check data types
+    if isinstance(point1, str):
+        point1 = pm.PyNode(point1)
+    if isinstance(point2, str):
+        point2 = pm.PyNode(point2)
+
+    # get point1 transform from transform node
+    vector1Product = pm.createNode('vectorProduct')
+    vector1Product.normalizeOutput.set(False)
+    point1.worldMatrix[0].connect(vector1Product.matrix)
+    # set vProduct node
+    vector1Product.operation.set(4)
+    for axis in 'XYZ':
+        vector1Product.attr('input1%s' % axis).set(0)
+
+    #get point2 Transform Node
+    vector2Product = pm.createNode('vectorProduct')
+    vector2Product.normalizeOutput.set(False)
+    point2.worldMatrix[0].connect(vector2Product.matrix)
+    # set v2Product node
+    vector2Product.operation.set(4)
+    for axis in 'XYZ':
+        vector2Product.attr('input1%s' % axis).set(0)
+
+    # substract vector1 from vector2
+    plusMinus=pm.createNode('plusMinusAverage')
+    plusMinus.operation.set(2) # substract
+    vector1Product.output.connect(plusMinus.input3D[1])  # vector2 - vector1
+    vector2Product.output.connect(plusMinus.input3D[0])
+
+    # finally connect to to another vector product and normalize if arg normalize is true
+    vectorBetween = pm.createNode('vectorProduct')
+    vectorBetween.operation.set(0)  # no operation
+    vectorBetween.normalizeOutput.set(normalized)
+    plusMinus.output3D.connect(vectorBetween.input1)
+
+    return vectorBetween
+
+
+def getVectorFromMatrix(transform, vector):
+    """
+    Get the desired vector from a transform node
+    :param transform:
+    :param vector:
+    :return: vectorProduct Node
+    """
+    # check args types and create pm nodes
+    if isinstance(transform, str):
+        transform = pm.PyNode(transform)
+
+    # get Transform vector
+    driverVecProduct = pm.createNode('vectorProduct')
+    driverVecProduct.normalizeOutput.set(True)
+    transform.worldMatrix[0].connect(driverVecProduct.matrix)
+    # set Vector product to vector matrix product
+    # and get x vector
+    driverVecProduct.operation.set(3)  # 3 is matrix vector product
+    for i, attr in enumerate('XYZ'):
+        driverVecProduct.attr('input1%s' % attr).set(vector[i])
+    driverVecProduct.normalizeOutput.set(True)
+
+    return driverVecProduct
+
+def jointChain(length, joints=10, curve=None):
+    """
+    create a joint chain
+    :param distance(float): length of the chain
+    :param joints(int): number of joints
+    :param curve(str or pm): if curve, adapt joints to curve
+    :return:
+    """
+    # distance between joints
+    distanceBetween = length/joints
+    jointsList = []  # store joints
+    if curve:
+        # check type
+        if isinstance(curve, str):
+            curve = pm.PyNode(curve)
+        if isinstance(curve, pm.nodetypes.Transform):
+            curve = curve.getShape()
+
+        # get max param value of the curve
+        maxValue = curve.maxValue.get()
+        incrValue = maxValue/(joints-1)  # distance increment per joint
+        for i in range(joints):
+            # first construct matrix
+            val = incrValue*i
+            vectorX = curve.tangent(val, space='world')
+            vectorY = curve.normal(val, space='world')
+            vectorZ = vectorX ^ vectorY  # cross product
+            vectorZ.normalize()
+            # get position
+            position = curve.getPointAtParam(val, space='world')
+
+            # create joint
+            joint = pm.joint()
+            # apply matrix
+            pm.xform(joint, ws=True, m=[vectorX.x, vectorX.y, vectorY.z, 0,
+                                        vectorY.x, vectorY.y, vectorY.z, 0,
+                                        vectorZ.x, vectorZ.y, vectorZ.z, 0,
+                                        position.x, position.y, position.z, 1])
+
+            pm.makeIdentity(joint, apply=True, t=False, r=True, s=False, n=False, pn=False)  # freeze rotation
+            jointsList.append(joint)
+
+
+    # if not curve arg
+    else:
+        for i in range(joints):
+            joint = pm.joint(p=[distanceBetween*i,0,0])
+            # append to list
+            jointsList.append(joint)
+        pm.select(cl=True)  # clear selection, to avoid posible errors with more chains
+
+    return jointsList
+
+
+def curveDriveJoints(curve, jointList):
+    """
+    Attach joints to curve TODO
+    :param curve:
+    :param jointList:
+    :return:
+    """
+    # data types
+    if isinstance(curve, str):
+        curve = pm.PyNode(curve)
+    if isinstance(curve, pm.nodetypes.Transform):
+        curve=pm.PyNode(curve)
+
+    snapCurveToPoints(jointList, curve)
+    for joint in jointList:
+        pass
