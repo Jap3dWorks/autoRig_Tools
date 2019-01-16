@@ -1352,17 +1352,20 @@ def getVectorFromMatrix(transform, vector):
 
     return driverVecProduct
 
-def jointChain(length, joints=10, curve=None):
+def jointChain(length=None, joints=10, curve=None):
     """
     create a joint chain
-    :param distance(float): length of the chain
+    :param distance(float): length of the chain, if curve arg is given, this param can be None
     :param joints(int): number of joints
     :param curve(str or pm): if curve, adapt joints to curve
-    :return:
+    :return: joint list
     """
-    # distance between joints
-    distanceBetween = length/joints
+    # to avoid errors clear selection
+    pm.select(cl=True)
+
     jointsList = []  # store joints
+
+    # if curve arg
     if curve:
         # check type
         if isinstance(curve, str):
@@ -1370,55 +1373,316 @@ def jointChain(length, joints=10, curve=None):
         if isinstance(curve, pm.nodetypes.Transform):
             curve = curve.getShape()
 
+        # dup the curve and rebuilt it, smoother results
+        curveDup = curve.duplicate()[0]
+        curveDup = curveDup.getShape()
+        pm.rebuildCurve(curveDup, ch=False, rpo=True, rt=False, end=True, kr=False, kep=True,
+                        kt=False, s=curveDup.numCVs(), d=2, tol=0.01)
+
         # get max param value of the curve
-        maxValue = curve.maxValue.get()
+        maxValue = curveDup.maxValue.get()
         incrValue = maxValue/(joints-1)  # distance increment per joint
-        for i in range(joints):
-            # first construct matrix
-            val = incrValue*i
-            vectorX = curve.tangent(val, space='world')
-            vectorY = curve.normal(val, space='world')
-            vectorZ = vectorX ^ vectorY  # cross product
-            vectorZ.normalize()
-            # get position
-            position = curve.getPointAtParam(val, space='world')
-
+        for i in range(joints+1):
             # create joint
-            joint = pm.joint()
-            # apply matrix
-            pm.xform(joint, ws=True, m=[vectorX.x, vectorX.y, vectorY.z, 0,
-                                        vectorY.x, vectorY.y, vectorY.z, 0,
-                                        vectorZ.x, vectorZ.y, vectorZ.z, 0,
-                                        position.x, position.y, position.z, 1])
+            if i < joints:
+                pm.select(cl=True)
+                joint = pm.createNode('joint')
+                joint.setTranslation(curveDup.getPointAtParam(incrValue * i, 'world'), 'world')
+                pm.select(cl=True)
+            if jointsList:
+                # first construct matrix
+                if i < joints:
+                    vectorX = pm.datatypes.Vector(joint.getTranslation('world') - jointsList[-1].getTranslation('world'))
+                    vectorX.normalize()
+                else:
+                    vectorX = curveDup.tangent(incrValue*(i-1), 'world')
 
-            pm.makeIdentity(joint, apply=True, t=False, r=True, s=False, n=False, pn=False)  # freeze rotation
-            jointsList.append(joint)
+                # if the curve do not has curvature, normal method will give us an error
+                try:
+                    vectorY = curveDup.normal(incrValue*(i-1), 'world')
+                except:
+                    # if it is the case, construct a basic vector
+                    vectorY = pm.datatypes.Vector([0,1,0])
+                    # while dot != 0 the vector isn't perpendicular
+                    if vectorX * vectorY != 0:
+                        # so we force a zero dot. dot formula: v1.x*v2.x + v1.y*v2.y + v1.z*v2.z
+                        logger.debug('vectorY no perpendicular '+str(vectorY))
+                        vectorY.z = - vectorX.y*vectorY.y
 
+                    # normalize vector
+                    vectorY.normalize()
+
+                vectorZ = vectorX ^ vectorY  # cross product
+                vectorZ.normalize()
+                # recalculate Y
+                vectorY =vectorZ ^ vectorX
+                vectorY.normalize()
+
+                # get position
+                position = curveDup.getPointAtParam(incrValue*(i-1), space='world')
+
+                # apply matrix
+                pm.xform(jointsList[-1], ws=True, m=[vectorX.x, vectorX.y, vectorX.z, 0,
+                                            vectorY.x, vectorY.y, vectorY.z, 0,
+                                            vectorZ.x, vectorZ.y, vectorZ.z, 0,
+                                            position.x, position.y, position.z, 1])
+
+                # freeze rotation
+                pm.makeIdentity(jointsList[-1], apply=True, t=False, r=True, s=False, n=False, pn=False)
+
+            # append new joint
+            if i < joints:
+                jointsList.append(joint)
+
+        # construct hierarchy
+        for i in range(joints-1):
+            jointsList[i].addChild(jointsList[i+1])
+
+        # delete duplicated curve
+        pm.delete(curveDup.getTransform())
 
     # if not curve arg
-    else:
+    elif length:
+        # distance between joints
+        distanceBetween = length / joints
         for i in range(joints):
             joint = pm.joint(p=[distanceBetween*i,0,0])
             # append to list
             jointsList.append(joint)
-        pm.select(cl=True)  # clear selection, to avoid posible errors with more chains
+        pm.select(cl=True)  # clear selection, to avoid possible errors with more chains
 
     return jointsList
 
 
-def curveDriveJoints(curve, jointList):
+def curveToSurface(curve, width=5.0, steps=10):
     """
-    Attach joints to curve TODO
-    :param curve:
-    :param jointList:
-    :return:
+    Create a surface from a nurbsCurve, using a loft node.
+    Use BBox to select one axis and move cvs of the curves
+    :param curve(pm or str): curve to generate loft
+    :return(tranform node): loft surface between curves
     """
-    # data types
+    # check types
     if isinstance(curve, str):
         curve = pm.PyNode(curve)
     if isinstance(curve, pm.nodetypes.Transform):
-        curve=pm.PyNode(curve)
+        curve = curve.getShape()
 
-    snapCurveToPoints(jointList, curve)
-    for joint in jointList:
-        pass
+    curveTransform = curve.getTransform()
+
+    # detect thinnest side using a bbox
+    bbox = curve.boundingBox()
+    bboxDict={}
+    for i, axis in enumerate('xyz'):  # priority to z axis
+        bboxDict[axis] = abs(bbox[0][i] - bbox[1][i])
+
+    minVal = min(bboxDict.values())
+    minAxis = bboxDict.keys()[bboxDict.values().index(minVal)]
+
+    for axis in 'xz':
+        if minAxis == 'y' and minVal == bboxDict[axis]:
+            minAxis = axis
+
+    # duplicate curve
+    dupCurve1 = curveTransform.duplicate()[0]
+    dupCurve1 = dupCurve1.getShape()
+    dupCurve2 = curveTransform.duplicate()[0]
+    dupCurve2 = dupCurve2.getShape()
+
+    # edit points
+    newPoint = pm.datatypes.Point(0, 0, 0)
+    setattr(newPoint, minAxis, width / 2.0)
+    print newPoint
+    # edit cvPoints
+    for j, curv in enumerate([dupCurve1, dupCurve2]):
+        # rebuildCurve
+        pm.rebuildCurve(curv,ch=False, rpo=True, rt=False, end=True, kr=False, kep=True, kt=False, s=steps, d=2, tol=0.01)
+        sign = -1 if j%2 else 1  # increment positive or negative
+        for i, CvPoint in enumerate(curv.getCVs('object')):
+            curv.setCV(i, CvPoint + (newPoint*sign), 'object')
+            curv.updateCurve()
+
+    # create loft
+    loft = pm.loft(dupCurve1, dupCurve2, ch=False, u=True, c=False, ar=True, d=2, ss=True,
+                   rn=False, po=False, rsn=True)[0]
+    pm.delete(dupCurve1.getTransform(), dupCurve2.getTransform())
+
+    return loft
+
+
+def variableFk(curve, numJoints, numControllers=3):
+    """
+    Create a variableFk system
+    :param curve:
+    :param numJoints:
+    :return:
+    """
+    # check data type
+    if isinstance(curve, str):
+        curve = pm.PyNode(curve)
+    if isinstance(curve, pm.nodetypes.Transform):
+        curve = curve.getShape()
+
+    systemGrp=pm.group(empty=True, name='variableFk_grp')
+
+    # container of the controllers and surface
+    controllerGrp=pm.group(empty=True, name='variableFk_ctr_grp')
+    controllerGrp.inheritsTransform.set(False)
+    systemGrp.addChild(controllerGrp)
+
+    # create joint chain
+    joints = jointChain(None, numJoints, curve)
+    # duplicate joints, ctr joints, their will drive the surface skin
+    jointsSkin = jointChain(None, numJoints, curve)
+    systemGrp.addChild(jointsSkin[0])
+    createRoots(jointsSkin)
+
+    # create nurbs surface from curve
+    surface = curveToSurface(curve, 2.5, numJoints)
+    surfaceShape = surface.getShape()
+
+    controllerGrp.addChild(surface)
+
+    # connect joints and surface by skinCluster
+    skinCluster = pm.skinCluster(jointsSkin, surfaceShape, mi=1)
+
+    # create controller
+    controllerList=[]
+    jointsRoots = []
+    for i in range(numControllers):
+        # normal x axis
+        controller = pm.circle(nr=(1,0,0), r=4.0, ch=False, name='variableFk%s_ctr' %i)[0]
+        # copy rotation from joint
+        pm.xform(controller, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
+        controller.setRotation(jointsSkin[0].getRotation('world'), 'world')
+        # create fallof attr
+        pm.addAttr(controller, ln='fallof', sn='fallof', minValue=0.01, type='float',
+                   defaultValue=0.2, maxValue=1.0, k=True)
+
+        # create a root on each joint for controller, each controller will be connected on one root
+        jointsRoots.append(createRoots(jointsSkin, str(controller)+'_auto'))
+
+        controllerList.append(controller)
+        controllerGrp.addChild(controller)
+
+    # root controller
+    controllerRoots = createRoots(controllerList)
+
+    # snap root to surface
+    for i, root in enumerate(controllerRoots):
+        pointOnSurf = pm.createNode('pointOnSurfaceInfo')
+        pointOnSurf.parameterV.set(0.5)
+        surfaceShape.worldSpace[0].connect(pointOnSurf.inputSurface)
+
+        # construct two transform matrix with fourByFourMatrix
+        matrixNurbs = pm.createNode('fourByFourMatrix')
+        matrixNurbIni = pm.createNode('fourByFourMatrix')  # with this we calculate the offset
+        for n, attr in enumerate(['normalizedTangentU', 'normalizedNormal', 'normalizedTangentV', 'position']):
+            for j, axis in enumerate('XYZ'):
+                pointOnSurf.attr('%s%s'%(attr, axis)).connect(matrixNurbs.attr('in%s%s' %(n,j)))
+                if n<3:
+                    # store matrix info
+                    matrixNurbIni.attr('in%s%s' %(n,j)).set(pointOnSurf.attr('%s%s'%(attr, axis)).get())
+
+        # store initial root matrix
+        rootMatrix = pm.xform(root, ws=True, q=True, m=True)
+        rootMatrixNode = pm.createNode('fourByFourMatrix')
+        for n, val in enumerate(rootMatrix):
+            rowPos = n % 4
+            colPos = n // 4
+            if colPos==3 and rowPos < 3:
+                val=0
+            elif colPos==3 and rowPos==3:
+                val=1
+            else:
+                val = val
+            rootMatrixNode.attr('in%s%s' % (colPos, rowPos)).set(val)
+
+        # calcOffset
+        inverseNode = pm.createNode('inverseMatrix')
+        rootMatrixNode.output.connect(inverseNode.inputMatrix)
+        offsetNode = pm.createNode('multMatrix')
+        matrixNurbIni.output.connect(offsetNode.matrixIn[0])
+        inverseNode.outputMatrix.connect(offsetNode.matrixIn[1])
+
+        # use mult matrix to add the offset
+        multMatrix = pm.createNode('multMatrix')
+        offsetNode.matrixSum.connect(multMatrix.matrixIn[0])
+        matrixNurbs.output.connect(multMatrix.matrixIn[1])
+
+        # now we need to read the matrix
+        decompose = pm.createNode('decomposeMatrix')
+        multMatrix.matrixSum.connect(decompose.inputMatrix)
+        # and connect to the root controller
+        decompose.outputTranslate.connect(root.translate)
+        decompose.outputRotate.connect(root.rotate)
+
+        # add slide attr to controller
+        defaultSlide = (i+1) / (float(numControllers+1))
+        pm.addAttr(controllerList[i], ln='slide', sn='slide', minValue=0.0, type='float', defaultValue=defaultSlide, maxValue=1.0, k=True)
+        # connect to Uparamenter
+        controllerList[i].slide.connect(pointOnSurf.parameterU)
+
+    # TODO finish the method, connect rotation controller to joints. with fallof
+    print jointsRoots
+    for i, rootChain in enumerate(jointsRoots):
+        print rootChain
+        controller = controllerList[i]
+        controllerRoot = controllerRoots[i]
+        for j, rootJoint in enumerate(rootChain):
+            print rootJoint
+            # calculate the joint point
+            jointPoint = j/(numJoints-1.0)  # range 0<->1 review
+            rootJoint.rename('%s_jointOffset_%s' %(controllerRoot, jointPoint))
+
+            # distance from controller
+            distanceCtr = pm.createNode('plusMinusAverage')
+            distanceCtr.operation.set(2)  # substract
+            distanceCtr.input1D[0].set(jointPoint)
+            controller.slide.connect(distanceCtr.input1D[1])
+            ## absoluteValue ##
+            square = pm.createNode('multiplyDivide')
+            square.operation.set(3)  # power
+            square.input2X.set(2)  # square
+            distanceCtr.output1D.connect(square.input1X)
+            # squareRoot
+            squareRoot = pm.createNode('multiplyDivide')
+            squareRoot.operation.set(3)  # power
+            squareRoot.input2X.set(.5)  # square
+            square.outputX.connect(squareRoot.input1X)
+
+            ## compare with fallof ## f-(p-c)
+            fallofDst = pm.createNode('plusMinusAverage')
+            fallofDst.operation.set(2)  # subtract
+            controller.fallof.connect(fallofDst.input1D[0])
+            squareRoot.outputX.connect(fallofDst.input1D[1])
+            # if the result < 0, stay in 0
+            condition = pm.createNode('condition')
+            condition.operation.set(2)  # greater than
+            condition.secondTerm.set(0)
+            condition.colorIfFalseR.set(0)
+            fallofDst.output1D.connect(condition.firstTerm)
+            fallofDst.output1D.connect(condition.colorIfTrueR)
+
+            ## normalize the resutlt ##
+            rotationMult = pm.createNode('multiplyDivide')
+            rotationMult.operation.set(2)  # divide
+            condition.outColorR.connect(rotationMult.input1X)
+            controller.fallof.connect(rotationMult.input2X)
+
+            ## connect to root joint ##
+            rotationRoot = pm.createNode('multiplyDivide')
+            rotationRoot.operation.set(1)  # multiply
+            controller.rotate.connect(rotationRoot.input1)
+            for axis in 'XYZ':
+                rotationMult.outputX.connect(rotationRoot.attr('input2%s' % axis))
+            # connect to to root
+            rotationRoot.output.connect(rootJoint.rotate)
+
+    # lock and hide attributes
+    lockAndHideAttr(controllerList, True, False, True)
+
+    # connect joints
+    for i, joint in enumerate(joints):
+        pm.orientConstraint(jointsSkin[i], joint, maintainOffset=False)
+        pm.pointConstraint(jointsSkin[i], joint, maintainOffset=False)
+
