@@ -1509,32 +1509,37 @@ def curveToSurface(curve, width=5.0, steps=10):
     return loft
 
 
-def variableFk(curve, numJoints, numControllers=3):
+def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
     """
+    TODO: without curve
     Create a variableFk system
     :param curve:
     :param numJoints:
     :return:
     """
-    # check data type
-    if isinstance(curve, str):
-        curve = pm.PyNode(curve)
-    if isinstance(curve, pm.nodetypes.Transform):
-        curve = curve.getShape()
+    if not curve:
+        curve = createCurveFromTransforms(jointList, 3)[1]
+    else:
+        # check data type
+        if isinstance(curve, str):
+            curve = pm.PyNode(curve)
+        if isinstance(curve, pm.nodetypes.Transform):
+            curve = curve.getShape()
 
-    systemGrp=pm.group(empty=True, name='variableFk_grp')
+    systemGrp = pm.group(empty=True, name='%s_grp' %name)
 
     # container of the controllers and surface
-    controllerGrp=pm.group(empty=True, name='variableFk_ctr_grp')
+    controllerGrp = pm.group(empty=True, name='%s_ctr_grp' %name)
     controllerGrp.inheritsTransform.set(False)
     systemGrp.addChild(controllerGrp)
 
-    # create joint chain
-    joints = jointChain(None, numJoints, curve)
-    # duplicate joints, ctr joints, their will drive the surface skin
-    jointsSkin = jointChain(None, numJoints, curve)
+    numJoints = len(jointList)
+
+    #duplicate joints
+    jointsSkin = [joint.duplicate(po=True)[0] for joint in jointList]
+    for i in range(len(jointsSkin)-1):
+        jointsSkin[i].addChild(jointsSkin[i+1])
     systemGrp.addChild(jointsSkin[0])
-    createRoots(jointsSkin)
 
     # create nurbs surface from curve
     surface = curveToSurface(curve, 2.5, numJoints)
@@ -1550,7 +1555,7 @@ def variableFk(curve, numJoints, numControllers=3):
     jointsRoots = []
     for i in range(numControllers):
         # normal x axis
-        controller = pm.circle(nr=(1,0,0), r=4.0, ch=False, name='variableFk%s_ctr' %i)[0]
+        controller = pm.circle(nr=(1,0,0), r=4.0, ch=False, name='%s%s_ctr' %(name,i))[0]
         # copy rotation from joint
         pm.xform(controller, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
         controller.setRotation(jointsSkin[0].getRotation('world'), 'world')
@@ -1632,7 +1637,7 @@ def variableFk(curve, numJoints, numControllers=3):
             print rootJoint
             # calculate the joint point
             jointPoint = j/(numJoints-1.0)  # range 0<->1 review
-            rootJoint.rename('%s_jointOffset_%s' %(controllerRoot, jointPoint))
+            rootJoint.rename('%s_jointOffset' %controllerRoot)
 
             # distance from controller
             distanceCtr = pm.createNode('plusMinusAverage')
@@ -1682,7 +1687,22 @@ def variableFk(curve, numJoints, numControllers=3):
     lockAndHideAttr(controllerList, True, False, True)
 
     # connect joints
-    for i, joint in enumerate(joints):
+    for i, joint in enumerate(jointList):
         pm.orientConstraint(jointsSkin[i], joint, maintainOffset=False)
         pm.pointConstraint(jointsSkin[i], joint, maintainOffset=False)
 
+
+def createCurveFromTransforms(transforms, degree=3):
+    """
+    create curve from transform list
+    :param transforms:
+    :return:
+    """
+    # check data type
+    if isinstance(transforms, str):
+        curve = pm.PyNode(transforms)
+
+    transformPoints = [transform.getTranslation('world') for transform in transforms]
+    curve = pm.curve(ep=transformPoints, d=degree)
+
+    return curve, curve.getShape()
