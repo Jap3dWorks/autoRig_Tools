@@ -7,6 +7,7 @@ from maya import mel
 import re
 import pymel.core as pm
 import math
+import ARCore
 
 import logging
 logging.basicConfig()
@@ -1050,6 +1051,22 @@ class CopyDeforms(object):
                 break
         print newWeights
         weightGeometryFilter.setWeight(targetNewWDPath, components, newWeights)
+
+
+def variableFkTool(curve, numJoints, numControllers=3):
+    """
+    :return:
+    """
+    # check data type
+    if isinstance(curve, str):
+        curve = pm.PyNode(curve)
+    if isinstance(curve, pm.nodetypes.Transform):
+        curve = curve.getShape()
+
+    # create joint chain
+    joints = ARCore.jointChain(None, numJoints, curve)
+
+    ARCore.variableFk(joints, curve, numControllers)
 
 
 class PickerTools(object):
