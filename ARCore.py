@@ -1543,7 +1543,7 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
     systemGrp.addChild(jointsSkin[0])
 
     # create system controller
-    mainCtr = pm.circle(nr=(1,0,0), r=7.0, ch=False, name='%s_main_ctr' % name)[0]
+    mainCtr = squareController(8, 8, 'x', 4)
     systemGrp.addChild(mainCtr)  # add controller to systemGrp
     pm.xform(mainCtr, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
     mainCtr.addChild(jointsSkin[0])  # add jointSkin chain
@@ -1567,10 +1567,9 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
     jointsRoots = []
     for i in range(numControllers):
         # normal x axis
-        controller = pm.circle(nr=(1,0,0), r=4.0, ch=False, name='%s%s_ctr' %(name,i))[0]
+        controller = squareController(5.0, 5.0,'x', 13)
         # copy rotation from joint
         pm.xform(controller, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
-        controller.setRotation(jointsSkin[0].getRotation('world'), 'world')
         # create fallof attr
         pm.addAttr(controller, ln='fallof', sn='fallof', minValue=0.01, type='float',
                    defaultValue=0.2, maxValue=1.0, k=True)
@@ -1588,7 +1587,8 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
     ## snap root to surface ##
     for i, root in enumerate(controllerRoots):
         pointOnSurf = pm.createNode('pointOnSurfaceInfo')
-        pointOnSurf.parameterV.set(0.5)
+        vValue = surfaceShape.maxValueV.get()/2
+        pointOnSurf.parameterV.set(vValue)
         surfaceShape.worldSpace[0].connect(pointOnSurf.inputSurface)
 
         # construct two transform matrix with fourByFourMatrix
@@ -1643,11 +1643,16 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
     # TODO add system general control
     # connect variableFk formula
     for i, rootChain in enumerate(jointsRoots):
-        print rootChain
         controller = controllerList[i]
         controllerRoot = controllerRoots[i]
+
+        # total joints affected
+        totalJointsA = pm.createNode('multiplyDivide')
+        totalJointsA.operation.set(1)  # multiply
+        totalJointsA.input1X.set(numJoints / 2)  # double
+        controller.fallof.connect(totalJointsA.input2X)
+
         for j, rootJoint in enumerate(rootChain):
-            print rootJoint
             # calculate the joint point
             jointPoint = j/(numJoints-1.0)  # range 0<->1 review
             rootJoint.rename('%s_jointOffset' %controllerRoot)
@@ -1687,12 +1692,6 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
             condition.outColorR.connect(rotationMult.input1X)
             controller.fallof.connect(rotationMult.input2X)
 
-            # total joints affected
-            totalJointsA = pm.createNode('multiplyDivide')
-            totalJointsA.operation.set(1)  #multiply
-            totalJointsA.input1X.set(numJoints/2)  # double
-            controller.fallof.connect(totalJointsA.input2X)
-
             # divide normalized value
             distRotation = pm.createNode('multiplyDivide')
             distRotation.operation.set(2)  # divide
@@ -1721,14 +1720,47 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
 def createCurveFromTransforms(transforms, degree=3):
     """
     create curve from transform list
-    :param transforms:
+    :param transforms [list]:
     :return:
     """
-    # check data type
-    if isinstance(transforms, str):
-        curve = pm.PyNode(transforms)
-
-    transformPoints = [transform.getTranslation('world') for transform in transforms]
+    transformPoints = [pm.PyNode(str(transform)).getTranslation('world') for transform in transforms]
     curve = pm.curve(ep=transformPoints, d=degree)
 
     return curve, curve.getShape()
+
+
+def squareController(heigh, width, normalAxis= 'x', color=None):
+    """
+    Create a curve square control with only one shape
+    :param heigh:
+    :param width:
+    :param normal:
+    :return:
+    """
+    # normal plane
+    normalPlane = 'xyz'.replace(normalAxis[0], '')
+    if len(normalPlane) > 2:
+        logger.error('squareController: normalAxis param must be "x" "y" or "z"')
+        raise RuntimeError
+
+    # point array, and construct the curve
+    widthList = [-width/2.0, width/2.0, width/2.0, -width/2.0]
+    heighList = [heigh/2.0, heigh/2.0, -heigh/2.0, -heigh/2.0]
+    pointArr = []
+    for i in range(len(widthList)+1):
+        indx = i % len(widthList)
+        point = pm.datatypes.Point(0,0,0)
+        setattr(point, normalPlane[0], widthList[indx])
+        setattr(point, normalPlane[1], heighList[indx])
+        pointArr.append(point)
+
+    # construct the curve using the point array
+    sqrController = pm.curve(ep=pointArr, ws=True ,d=1)
+
+    # if color, apply the color on the shape
+    if color:
+        shape = sqrController.getShape()
+        shape.overrideEnabled.set(True)
+        shape.overrideColor.set(color)
+
+    return sqrController

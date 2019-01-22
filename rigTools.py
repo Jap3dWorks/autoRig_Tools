@@ -60,6 +60,8 @@ def snapIkFk(name, zoneA, zoneB, zoneC, side):
     """
     snap ik fk or fk ik
     args:
+        TODO: zonesList[]->no multiple parameters
+        TODO: find scale factor node/value
         name(str): character name
         zoneA(str): zone to snap p.e leg, arm
         zoneB(str): zone below zoneA to snap p.e foot, hand
@@ -67,7 +69,7 @@ def snapIkFk(name, zoneA, zoneB, zoneC, side):
         side(str): left or right
     """
     # TODO rewrite this method, adapting it to name convention and with only one input FIXME
-    attrShape = '%s_%s_%s_attrShape' % (name, zoneA, side)
+    attrShape = '%s_%s_%s_attrShape' % (name, side, zoneA)
     attrValue = cmds.getAttr('%s.ikFk' % attrShape)
 
     #Fixme: fix name convention expressions
