@@ -1052,9 +1052,36 @@ class CopyDeforms(object):
         print newWeights
         weightGeometryFilter.setWeight(targetNewWDPath, components, newWeights)
 
+"""
+--Example Copy deformers--
+
+# copy skin
+rigTools.CopyDeforms.copySkin('akona_body_mesh', 'akona_cloths_deformMesh')
+
+# copy BS
+rigTools.CopyDeforms.copyBlendShapes('PSDAkona', 'akona_cloths_deformMesh')
+
+# connect BS to PSD
+rigTools.PSDUtils.connectBlendShapes('akona_PSDCloth')
+
+# connect Clusters
+rigTools.CopyDeforms.copyClusterWeights('cluster1', 'pTorus1')
+# rigTools.CopyDeforms.copyClusterWeights('akona_chest_clusterCluster', 'akona_cloths_deformMesh')
+
+
+# move skinedjoints
+cmds.skinCluster('akona_cloths_deformMesh', e=True, mjm=False)
+cmds.skinCluster('skinHelper', e=True, mjm=False)
+cmds.skinCluster('akona_hair_mesh', e=True, mjm=False)
+"""
+
 
 def variableFkTool(curve, numJoints, numControllers=3):
     """
+    Given a curve, set up a variable fk system.
+    :param curve(str or pm): guide curve
+    :param numJoints (int): num of joints for the system
+    :param numControllers (int): FK controllers per system
     :return:
     """
     # check data type

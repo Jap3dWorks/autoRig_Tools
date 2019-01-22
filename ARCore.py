@@ -1407,7 +1407,7 @@ def jointChain(length=None, joints=10, curve=None):
                     if vectorX * vectorY != 0:
                         # so we force a zero dot. dot formula: v1.x*v2.x + v1.y*v2.y + v1.z*v2.z
                         logger.debug('vectorY no perpendicular '+str(vectorY))
-                        vectorY.z = - vectorX.y*vectorY.y
+                        vectorY.z = - (vectorX.y*vectorY.y / vectorX.z)
 
                     # normalize vector
                     vectorY.normalize()
@@ -1526,6 +1526,7 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
         if isinstance(curve, pm.nodetypes.Transform):
             curve = curve.getShape()
 
+    # container for the system, joints
     systemGrp = pm.group(empty=True, name='%s_grp' %name)
 
     # container of the controllers and surface
@@ -1535,11 +1536,22 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
 
     numJoints = len(jointList)
 
-    #duplicate joints
+    ## duplicate joints ##
     jointsSkin = [joint.duplicate(po=True)[0] for joint in jointList]
     for i in range(len(jointsSkin)-1):
         jointsSkin[i].addChild(jointsSkin[i+1])
     systemGrp.addChild(jointsSkin[0])
+
+    # create system controller
+    mainCtr = pm.circle(nr=(1,0,0), r=7.0, ch=False, name='%s_main_ctr' % name)[0]
+    systemGrp.addChild(mainCtr)  # add controller to systemGrp
+    pm.xform(mainCtr, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
+    mainCtr.addChild(jointsSkin[0])  # add jointSkin chain
+
+    #joint skin roots, for conserve direction
+    jointsSkinRoots = createRoots(jointsSkin)
+    # root of main ctr
+    mainCtrRoot = createRoots([mainCtr])
 
     # create nurbs surface from curve
     surface = curveToSurface(curve, 2.5, numJoints)
@@ -1550,7 +1562,7 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
     # connect joints and surface by skinCluster
     skinCluster = pm.skinCluster(jointsSkin, surfaceShape, mi=1)
 
-    # create controller
+    ## create controllers ##
     controllerList=[]
     jointsRoots = []
     for i in range(numControllers):
@@ -1564,15 +1576,16 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
                    defaultValue=0.2, maxValue=1.0, k=True)
 
         # create a root on each joint for controller, each controller will be connected on one root
-        jointsRoots.append(createRoots(jointsSkin, str(controller)+'_auto'))
+        jointsRoots.append(createRoots(jointsSkin, '_auto'))
 
         controllerList.append(controller)
         controllerGrp.addChild(controller)
 
-    # root controller
+    # root controllers
     controllerRoots = createRoots(controllerList)
 
-    # snap root to surface
+
+    ## snap root to surface ##
     for i, root in enumerate(controllerRoots):
         pointOnSurf = pm.createNode('pointOnSurfaceInfo')
         pointOnSurf.parameterV.set(0.5)
@@ -1627,8 +1640,8 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
         # connect to Uparamenter
         controllerList[i].slide.connect(pointOnSurf.parameterU)
 
-    # TODO finish the method, connect rotation controller to joints. with fallof
-    print jointsRoots
+    # TODO add system general control
+    # connect variableFk formula
     for i, rootChain in enumerate(jointsRoots):
         print rootChain
         controller = controllerList[i]
@@ -1655,7 +1668,7 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
             squareRoot.input2X.set(.5)  # square
             square.outputX.connect(squareRoot.input1X)
 
-            ## compare with fallof ## f-(p-c)
+            ## compare with fallof ## ((f-(|p-c|))/f)
             fallofDst = pm.createNode('plusMinusAverage')
             fallofDst.operation.set(2)  # subtract
             controller.fallof.connect(fallofDst.input1D[0])
@@ -1674,12 +1687,25 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
             condition.outColorR.connect(rotationMult.input1X)
             controller.fallof.connect(rotationMult.input2X)
 
-            ## connect to root joint ##
+            # total joints affected
+            totalJointsA = pm.createNode('multiplyDivide')
+            totalJointsA.operation.set(1)  #multiply
+            totalJointsA.input1X.set(numJoints/2)  # double
+            controller.fallof.connect(totalJointsA.input2X)
+
+            # divide normalized value
+            distRotation = pm.createNode('multiplyDivide')
+            distRotation.operation.set(2)  # divide
+            rotationMult.outputX.connect(distRotation.input1X)
+            totalJointsA.outputX.connect(distRotation.input2X)
+
+            ## connect to root joint and controller rotation ##
             rotationRoot = pm.createNode('multiplyDivide')
             rotationRoot.operation.set(1)  # multiply
+            # multiply with controller
             controller.rotate.connect(rotationRoot.input1)
             for axis in 'XYZ':
-                rotationMult.outputX.connect(rotationRoot.attr('input2%s' % axis))
+                distRotation.outputX.connect(rotationRoot.attr('input2%s' % axis))
             # connect to to root
             rotationRoot.output.connect(rootJoint.rotate)
 
