@@ -166,45 +166,6 @@ class PickerUI(QtWidgets.QWidget):
 
 
 ## UTILS ##
-def getControllerButtons():
-    """
-    {controllerName:[[position],[size]], ... }
-    TODO: add color
-    :return: controllers
-    """
-    normalizeValue = 12.0
-    meshes = cmds.ls(type='mesh')
-    controllers = {}
-
-    # get controller info
-    for mesh in meshes:
-        meshInfo=[]
-        # get transform
-        transform = cmds.listRelatives(mesh, p=True)[0]
-        # position
-        bbox = cmds.xform(transform, boundingBox=True, ws=True, q=True)
-        position = [bbox[0]/normalizeValue, bbox[2]/normalizeValue]
-        meshInfo.append(position)
-
-        # calculate size
-        size = [math.fabs((bbox[3] - bbox[0]) / normalizeValue), math.fabs((bbox[2] - bbox[5]) / normalizeValue)]
-        meshInfo.append(size)
-
-        # color
-        color = cmds.getAttr('%s.overrideColorRGB' % mesh)[0]
-        meshInfo.append(color)
-
-        # extra attributes
-        for attr in ('ikFk', 'snap'):
-            attrValue = cmds.getAttr('%s.%s' % (transform, attr))
-            meshInfo.append(attrValue)
-
-        # save controller to dictionary
-        controllers[transform] = meshInfo
-
-    return controllers
-
-
 def getDock(name='PickerUIDock'):
     deleteDock(name)
     # Creates and manages the widget used to host windows in a layout
