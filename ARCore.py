@@ -1662,7 +1662,7 @@ def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
             distanceCtr.operation.set(2)  # substract
             distanceCtr.input1D[0].set(jointPoint)
             controller.slide.connect(distanceCtr.input1D[1])
-            ## absoluteValue ##
+            ## absoluteVal ##
             square = pm.createNode('multiplyDivide')
             square.operation.set(3)  # power
             square.input2X.set(2)  # square
