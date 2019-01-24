@@ -152,22 +152,22 @@ def arrangeListByHierarchy(itemList):
         sizeFullPath = fullPath.split('|')
         return len(sizeFullPath)
 
-    toesJointsCopy = list(itemList)  # copy of the toes list
-    toesJointsArr = []
-    while len(toesJointsCopy):
+    itemListCopy = list(itemList)  # copy of the toes list
+    itemListArr = []
+    while len(itemListCopy):
         toeJoint = []
-        firstJoint = toesJointsCopy.pop(0)
+        firstJoint = itemListCopy.pop(0)
         toeJoint.append(firstJoint)
         for joint in firstJoint.listRelatives(ad=True):
-            if joint in toesJointsCopy:
+            if joint in itemListCopy:
                 toeJoint.append(joint)
-                toesJointsCopy.remove(joint)
+                itemListCopy.remove(joint)
 
         # sort the list to assure a good order
-        toesJointsArr.append(sorted(toeJoint, key=hierarchySize))
-    logger.debug('arrangeListByHierarchy: sorted: %s' % toesJointsArr)
+        itemListArr.append(sorted(toeJoint, key=hierarchySize))
+    logger.debug('arrangeListByHierarchy: sorted: %s' % itemListArr)
 
-    return toesJointsArr
+    return itemListArr
 
 def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
     """
@@ -301,7 +301,7 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
             distanceBetweenPoleList.append(distancePoleScale)
 
     # conditional node
-    conditionalScaleFactor = pm.createNode('condition', name='%s_ikStretch_stretchValue_conditional' % nameInfo)  # review stretchValue
+    conditionalScaleFactor = pm.createNode('condition', name='%s_ikStretch_stretchValue_condition' % nameInfo)  # TIP stretchValue here
     conditionalScaleFactor.operation.set(2)
     conditionalScaleFactor.colorIfFalseR.set(1)
     # connect distance to conditional
@@ -471,7 +471,7 @@ def syncListsByKeyword(primaryList, secondaryList, keyword=None):
     # if not keyword try to find one
     if not keyword:
         count = {}
-        # count how many copies of each word we have, using a dictionary
+        # count how many copies of each word we have, using a dictionary on the secondary list
         for secondaryItem in secondaryList:
             for word in str(secondaryItem).split('_'):
                 for fChar in filterChars:
