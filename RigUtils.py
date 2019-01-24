@@ -12,126 +12,208 @@ logging.basicConfig()
 logger = logging.getLogger('RigUtils:')
 logger.setLevel(logging.DEBUG)
 
-
-# todo: pymel mode all
-def snapIkFk(name, zoneA, zoneB, zoneC, side):
+def snapIkFk(controller):
     """
     snap ik fk or fk ik
-    args:
-        TODO: zonesList[]->no multiple parameters
-        TODO: find scale factor node/value
-        name(str): character name
-        zoneA(str): zone to snap p.e leg, arm
-        zoneB(str): zone below zoneA to snap p.e foot, hand
-        zoneC(str): zone below zoneB to snap p.e toe, finger
-        side(str): left or right
+    :param controller(str or pm): Controller with ikFk shape attribute
+    :return:
     """
-    # TODO rewrite this method, adapting it to name convention and with only one input FIXME
-    attrShape = '%s_%s_%s_attrShape' % (name, side, zoneA)
-    attrValue = cmds.getAttr('%s.ikFk' % attrShape)
+    # check type
+    if isinstance(controller, str):
+        ikCtr = pm.PyNode(controller)
 
-    #Fixme: fix name convention expressions
-    # find fk ik Controllers and main
-    fkControllers = [i for i in cmds.ls() if
-                     re.match('^%s_fk_(%s|%s)_*%s_((?!end).).*ctr$' % (name, zoneA, zoneB, side), str(i))]
-    ikControllers = [i for i in cmds.ls() if
-                     re.match('^%s_ik_(%s|%s)_*%s_((?!end).).*ctr$' % (name, zoneA, zoneB, side), str(i))]
-    mainJoints = [i for i in cmds.ls() if
-                  re.match('^%s_main_(%s|%s)_*%s_((?!end).).*joint$' % (name, zoneA, zoneB, side), str(i))]
+    ########################################
+    ## Find all controls and main objects ##
+    ########################################
 
-    ikMatchControllers = []  # controls that are common
-    fkMatchControllers = []  # controls that are common
-    mainMatchControllers = []  # controls that are common
-    poleVectorCtr = None  # pole vector ctr
-    ikToeGeneral = None  # general toes control ik
-    fkToeGeneral = None  # general toes control fk
-    ikFootCtr = None  # ik foot control
-    mainFootJoint = None  # main foot joint
-    fkFootCtr = None  # fk foot control
-    ikBallCtr = None
-    # arrange lists to be synchronized
-    for ikCtr in list(ikControllers):
+    # get locator shape, it is common in all ik and fk controllers.
+    # also it has the ikFk info
+    locatorS = ikCtr.listRelatives(s=True, type=pm.nodetypes.Locator)[0]
+    logger.debug('locatorS: %s' % locatorS)
+    if not locatorS:
+        logger.info('is not a ik fk chain')
+        return
+
+    # ikFk attribute value
+    ikFkAttr = locatorS.ikFk
+
+    instances = locatorS.getInstances()
+    logger.debug('locator instances: %s' % instances)
+    ikCtrList = []  # system ik controllers
+    fkCtrList = []  # # system Fk controllers
+    # get controllers from instances of locator
+    for i in instances:
+        controller = i.split('|')[-2]
+        controller = pm.PyNode(controller)
+        if 'ik' in str(controller):
+            ikCtrList.append(controller)
+        elif 'fk' in str(controller):
+            fkCtrList.append(controller)
+
+    # reverse lists, from nearest to world to last child
+    ikCtrList = list(reversed(ikCtrList))
+    fkCtrList = list(reversed(fkCtrList))
+
+    # ik Stretch node with stretch value
+    ikStretchNode = None
+    try:
+        # use top fk controller, because it has the correct base name of the system.
+        ikStretchNode = str(fkCtrList[0]).split('_')[0:3]  # base name of the system
+        ikStretchNode = pm.PyNode('_'.join(ikStretchNode+['ikStretch','stretchValue','condition'])) # name of the stretch ik node
+    except:
+        pass
+
+    # get system main joints
+    mainJointList = [pm.PyNode(str(fk).replace('fk', 'main').replace('ctr', 'joint')) for fk in fkCtrList]
+
+    # get pole controller
+    ikHandle = ikCtrList[0].listRelatives(ad=True, type='ikHandle')[0]
+    poleConstraint = ikHandle.poleVectorX.inputs(type='constraint')[0]
+    pole = poleConstraint.target[0].targetTranslate.inputs(type='transform')[0]
+
+    ## find child controllers, fingers, foot controllers, etc ##
+    ikChildList = [ctr.getTransform() for ctr in ikCtrList[0].listRelatives(ad=True, type='nurbsCurve') if
+                ctr.getTransform() not in ikCtrList]
+    fkChildList = [ctr.getTransform() for ctr in fkCtrList[0].listRelatives(ad=True, type='nurbsCurve') if
+               ctr.getTransform() not in fkCtrList]
+    mainChildList = [ctr for ctr in mainJointList[0].listRelatives(ad=True, type='joint') if ctr not in mainJointList]
+
+    ikChildCommonCtr = []
+    fkChildCommonCtr = []
+    ikFkChildCommonCtr = []  # [ikCtrA, fkCtrA, ikCtrB, fkctrB,...] controllers only appear in ik and fk chains
+    mainChildCommonJnt = []
+    # get common controllers between lists
+    # copy of the fkChils list, because we are going to delete members
+    for i, fkCtr in enumerate(list(fkChildList)):
+        # ask if the given sttr is in the list
         try:
-            mainIndex = mainJoints.index(ikCtr.replace('ik', 'main').replace('ctr', 'joint'))
-            fkIndex = fkControllers.index(ikCtr.replace('ik', 'fk'))
-
-            if ikCtr == '%s_ik_%s_%s_%s_ctr' % (name, zoneB, side, zoneB):
-                ikFootCtr = ikCtr
-                ikControllers.remove(ikCtr)
-                mainFootJoint = mainJoints.pop(mainIndex)
-                fkFootCtr = fkControllers.pop(fkIndex)
-
-            else:
-                mainMatchControllers.append(mainJoints.pop(mainIndex))
-                fkMatchControllers.append(fkControllers.pop(fkIndex))
-                ikMatchControllers.append(ikCtr)
-                ikControllers.remove(ikCtr)
+            # it is possible some ctr in ik and fk, but not in main, like generaToe ctr
+            ikCtr = pm.PyNode(str(fkCtr).replace('fk', 'ik'))
+            try:
+                # try if it exists in main too
+                mainJnt = pm.PyNode(str(fkCtr).replace('fk', 'main').replace('ctr', 'joint'))
+                mainChildCommonJnt.append(mainJnt)
+                mainChildList.remove(mainJnt)
+            except:
+                # if controller is not in main, it is a special controller, only for ik and fk chains
+                ikFkChildCommonCtr.append(ikCtr)
+                ikFkChildCommonCtr.append(fkCtr)
+                fkChildList.remove(fkCtr)
+                ikChildList.remove(ikCtr)
+                # continue next loop
+                continue
+            # append to common lists
+            fkChildCommonCtr.append(fkCtr)
+            ikChildCommonCtr.append(ikCtr)
+            # remove from child lists
+            fkChildList.remove(fkCtr)
+            ikChildList.remove(ikCtr)
 
         except:
-            if 'pole' in ikCtr:
-                poleVectorCtr = ikCtr
-                ikControllers.remove(ikCtr)
+            pass
 
-            if 'ball' in ikCtr.lower():
-                ikBallCtr = ikCtr
+    # find possible parents of the system, p.e clavicle
+    # use the skin skeleton, because it has a more clean hierarchy and it is easiest
+    skinJoint = pm.PyNode(str(fkCtrList[0]).replace('fk', 'skin').replace('ctr', 'joint'))
+    parentJoint = skinJoint.firstParent()  # first parent for the test
+    parentFkCtrList = []
+    # iterate over the parents to find valid system parents, like clavicle
+    # valid parents only can have 1 joint child
+    while True:
+        childCount = parentJoint.getChildren(type='joint')
+        if len(childCount) > 1:
+            # more than 1 child joint, isn't valid
+            logger.debug('No parent ctr found')
+            break
+        else:
+            try:
+                parentCtr = pm.PyNode(str(parentJoint).replace('skin', 'fk').replace('joint','ctr'))
+            except:
+                # do not exists a valid ctr, break the iteration
+                logger.debug('No parent ctr found')
+                break
+            # save the control and try another joint
+            parentFkCtrList.append(parentCtr)
+            parentJoint = parentJoint.firstParent()
 
-            elif zoneC and '%sGeneral' % zoneC in ikCtr:
-                ikToeGeneral = ikCtr
-                ikControllers.remove(ikCtr)
+    ##########
+    #ik -> fk#
+    ##########
+    if ikFkAttr.get():
+        # parent ctr, like clavicles
+        if parentFkCtrList:
+            parentRotation = parentFkCtrList[0].getRotation('world')
+            zoneName = str(parentFkCtrList[0]).split('_')[1]  # zone str name
+            try:
+                # try if it has an auto attribute
+                locatorS.attr('auto%s' % zoneName.capitalize()).set(0)
+                parentFkCtrList[0].setRotation(parentRotation, 'world')
+            except:
+                pass
 
-                elemetnIndex = fkControllers.index(ikCtr.replace('ik', 'fk'))
-                fkToeGeneral = fkControllers.pop(elemetnIndex)
+        # copy stretch factor, if the system has stretch option
+        if ikStretchNode:
+            locatorS.fkStretch.set(ikStretchNode.outColorR.get())
 
-    # ik -> fk
-    if attrValue:
-        # copy rotation from main joints, this can give som errors in toes, because main joints does not has general toe ctr
-        # so we exclude foot and toes
-        for i, mainj in enumerate(mainJoints):
-            cmds.xform(fkControllers[i], a=True, eu=True, ro=cmds.xform(mainj, a=True, eu=True, q=True, ro=True))
+        # copy rotation from main joints
+        for i, mainj in enumerate(mainJointList):
+            fkCtrList[i].setRotation(mainj.getRotation())
+            # cmds.xform(fkControllers[i], a=True, eu=True, ro=cmds.xform(mainj, a=True, eu=True, q=True, ro=True))
 
-        ikFkCtr = ikBallCtr if ikBallCtr else ikFootCtr  # if we have ikBall use it for the snap
-        cmds.xform(fkFootCtr, a=True, ws=True, ro=cmds.xform(ikFkCtr, a=True, ws=True, q=True, ro=True))
-        cmds.xform(fkToeGeneral, a=True, ro=cmds.xform(ikToeGeneral, q=True, a=True, ro=True))
-        # controllers that match between ik, fk and main.
-        for i, fkCtr in enumerate(fkMatchControllers):
-            cmds.xform(fkCtr, ws=True, m=cmds.xform(ikMatchControllers[i], ws=True, q=True, m=True))
+        # last system ctr, foot or hand
+        # if we have ikChilds, we have a foot system, so we snap to 'ball' controller (the last)
+        if ikChildList:
+            #print 'ballCtr', ikChildList[-1]
+            fkCtrList[-1].setRotation(ikChildList[-1].getRotation('world'), 'world')
 
-        cmds.setAttr('%s.ikFk' % attrShape, not attrValue)
+        # ikFk exclusive controllers
+        #for i in range(0, len(ikFkChildCommonCtr), 2):
+            #ikFkChildCommonCtr[i+1].setRotation(ikFkChildCommonCtr[i].getRotation('world'), 'world')
 
-    # fk -> ik
-    elif not attrValue:
+        # ik Fk main common ctrllers, general first
+        for i, fkCtr in enumerate(fkChildCommonCtr):
+            fkCtr.setRotation(mainChildCommonJnt[i].getRotation('world'), 'world')
+
+        ikFkAttr.set(0)
+
+    ##########
+    #fk -> ik#
+    ##########
+    elif not ikFkAttr.get():
         # reset walk values
-        if ikControllers:  # ikControllers only just left walk controllers
-            for attr in ('heel', 'tilt', 'toes', 'ball', 'footRoll'):
-                cmds.setAttr('%s.%s' % (ikFootCtr, attr), 0)
-                if attr == 'tilt':  # we have two tilts
-                    for inOut in ('In', 'Out'):
-                        ctrIndex = ikControllers.index(
-                            '%s_ik_foot_%s_foot%s%s_ctr' % (name, side, attr.capitalize(), inOut))
-                        cmds.xform(ikControllers[ctrIndex], a=True, t=(0, 0, 0), ro=(0, 0, 0), s=(1, 1, 1))
-                elif attr == 'footRoll':
-                    continue
-                else:
-                    ctrIndex = ikControllers.index('%s_ik_%s_%s_foot%s_ctr' % (name, zoneB, side, attr.capitalize()))
-                    cmds.xform(ikControllers[ctrIndex], a=True, t=(0, 0, 0), ro=(0, 0, 0), s=(1, 1, 1))
+        if ikChildList:  # ikControllers only just left walk controllers
+            ikCtrAttributes = pm.listAttr(ikCtrList[0], ud=True, k=True)
+            for attr in ikCtrAttributes:
+                ikCtrList[0].attr('%s' % attr).set(0)
 
-        cmds.xform(ikFootCtr, ws=True, m=cmds.xform(fkFootCtr, q=True, ws=True, m=True))
-        cmds.xform(ikToeGeneral, a=True, ro=cmds.xform(fkToeGeneral, q=True, a=True, ro=True))
-        # snap toes
-        for i, ikCtr in enumerate(ikMatchControllers):
-            cmds.xform(ikCtr, ws=True, m=cmds.xform(fkMatchControllers[i], ws=True, q=True, m=True))
+            # set ikChildCtr to 0
+            for ikCtr in ikChildList:
+                ikCtr.setRotation((0,0,0))
 
-        if poleVectorCtr:
+        pm.xform(ikCtrList[0], ws=True, m=pm.xform(fkCtrList[-1], q=True, ws=True, m=True))
+
+        # ikFk exclusive controllers
+        for i in range(0, len(ikFkChildCommonCtr), 2):
+            ikFkChildCommonCtr[i+1].setRotation(ikFkChildCommonCtr[i].getRotation('world'), 'world')
+
+        # ikFk exclusive controllers
+        for i in range(0, len(ikFkChildCommonCtr), 2):
+            ikFkChildCommonCtr[i].setRotation(ikFkChildCommonCtr[i+1].getRotation('world'), 'world')
+
+        # ik Fk main common ctrllers, general first
+        for i, ikCtr in enumerate(ikChildCommonCtr):
+            ikCtr.setRotation(mainChildCommonJnt[i].getRotation('world'), 'world')
+
+        if pole:
             # poleVector, use vector additive propriety
-            upperLegPos = cmds.xform(mainJoints[0], q=True, ws=True, t=True)
-            lowerLegPos = cmds.xform(mainJoints[1], q=True, ws=True, t=True)
-            footPos = cmds.xform(mainFootJoint, q=True, ws=True, t=True)
+            upperLegPos = mainJointList[0].getTranslation('world')
+            lowerLegPos = mainJointList[1].getTranslation('world')
+            footPos = mainJointList[2].getTranslation('world')
 
-            vector1 = OpenMaya.MVector(lowerLegPos[0] - upperLegPos[0], lowerLegPos[1] - upperLegPos[1],
-                                       lowerLegPos[2] - upperLegPos[2])
+            vector1 = pm.datatypes.Vector(lowerLegPos-upperLegPos)
             vector1.normalize()
-            vector2 = OpenMaya.MVector(lowerLegPos[0] - footPos[0], lowerLegPos[1] - footPos[1],
-                                       lowerLegPos[2] - footPos[2])
+
+            vector2 = pm.datatypes.Vector(lowerLegPos - footPos)
             vector2.normalize()
 
             poleVectorPos = vector1 + vector2
@@ -140,29 +222,10 @@ def snapIkFk(name, zoneA, zoneB, zoneC, side):
             poleVectorPos = poleVectorPos * 20
 
             # set pole vector position
-            cmds.xform(poleVectorCtr, ws=True, t=(
-            poleVectorPos.x + lowerLegPos[0], poleVectorPos.y + lowerLegPos[1], poleVectorPos.z + lowerLegPos[2]))
+            pole.setTranslation(poleVectorPos+lowerLegPos, 'world')
 
-        cmds.setAttr('%s.ikFk' % attrShape, not attrValue)
+        ikFkAttr.set(1)
 
-"""
-if __name__ == '__main__':
-    snapIkFk('akona', 'leg', 'foot', 'toe', 'left')
-
-
-import pymel.core as pm
-# create 2 cubes, pcube1 and pCube2 with diferent orientations but the same shape position
-cube01 = pm.PyNode('pCube1')
-cube02 = pm.PyNode('pCube2')
-
-Offset = cube01.getRotation(space='world', quaternion=True)*cube02.getRotation(space='world', quaternion=True).invertIt()
-print Offset
-
-Offset.invertIt()
-
-# now rotate cube 1 and apply the line below
-cube02.setRotation(Offset*cube01.getRotation(space='world', quaternion=True), 'world')
-"""
 
 def neckHeadIsolateSnap(name, zone, controller, point, orient):
     """
