@@ -145,7 +145,8 @@ def snapIkFk(controller):
             parentRotation = parentFkCtrList[0].getRotation('world')
             zoneName = str(parentFkCtrList[0]).split('_')[1]  # zone str name
             try:
-                # try if it has an auto attribute
+                # try if it has an auto attribute, if system does not has an auto attribute,
+                # it is not necessary apply rotation
                 locatorS.attr('auto%s' % zoneName.capitalize()).set(0)
                 parentFkCtrList[0].setRotation(parentRotation, 'world')
             except:
@@ -181,7 +182,7 @@ def snapIkFk(controller):
     ##########
     elif not ikFkAttr.get():
         # reset walk values
-        if ikChildList:  # ikControllers only just left walk controllers
+        if ikChildList:  # ikControllers only just like walk controllers
             ikCtrAttributes = pm.listAttr(ikCtrList[0], ud=True, k=True)
             for attr in ikCtrAttributes:
                 ikCtrList[0].attr('%s' % attr).set(0)
@@ -448,6 +449,7 @@ def ProxyDisconnectConstraints(name, value):
         if skinNode:
             cmds.setAttr('%s.nodeState' % skinNode[0], value)  # disconnect
             cmds.setAttr('%s.frozen' % skinNode[0], value)
+
 """
 if __name__ == '__main__':
     proxyShowUI('akona')
