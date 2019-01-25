@@ -1498,8 +1498,8 @@ class RigAuto(object):
         # Find base curve
         baseCurve = wire.baseWire[0].inputs()[0]
         # get controls
-        curveTransforms = ARCore.TransformCurveCVCtr(curve)
-        baseCurveTransforms = ARCore.TransformCurveCVCtr(baseCurve)
+        curveTransforms = ARCore.transformDriveCurveCV(curve)
+        baseCurveTransforms = ARCore.transformDriveCurveCV(baseCurve)
 
         # vinculate to rig
         for i, trn in enumerate(curveTransforms):
