@@ -394,7 +394,7 @@ def conserveVolumeAnimNode(animCurve, varyTime, invFactor, Factor, nameInfo):
         varyTime(index): frame to track value from the curve
         invFactor(node): plusMinusAverage node with 1-Factor
         Factor(node): scale Factor maxium
-        nameInfo: list of three elements with name info p.e('akona', 'leg', 'lowerLeg')
+        nameInfo: list of three elements with name info p.e('akona', 'leg', 'lowerLeg') # review
 
     Returns: multiplyDivide node with final factor
 
@@ -1078,7 +1078,7 @@ def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
 
 def transformDriveCurveCV(curve):
     """
-    Connect transformations to each curve control point
+    Connect transformations to each Curve Vertex point
     :param curve(str or pm):
     :return (list): list with created transformations
     """
@@ -1329,7 +1329,7 @@ def getVectorBetweenTransforms(point1, point2, normalized=True):
     vectorBetween.normalizeOutput.set(normalized)
     plusMinus.output3D.connect(vectorBetween.input1)
 
-    return vectorBetween
+    return vectorBetween, vector1Product, vector2Product
 
 
 def getVectorFromMatrix(transform, vector):
@@ -1516,6 +1516,7 @@ def curveToSurface(curve, width=5.0, steps=10):
 def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
     """
     TODO: without curve
+    TODO: class
     Create a variableFk system
     :param curve:
     :param numJoints:
@@ -1782,7 +1783,7 @@ def getCurrentPath():
     return os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
 
-def wireCurve(curve):
+class wireCurve(object):
     """
     Build a wire system on a curve, trying to maintain the length of the curve when move extremes.
     :param curve(str or pm):
@@ -1790,126 +1791,140 @@ def wireCurve(curve):
     TODO: scalable
     TODO: review formula, when vector length is minor than ini value, it grows to much
     """
+    def __init__(self, curve):
+        self.curve = curve
+        # check type
+        if isinstance(self.curve, str):
+            self.curve = pm.PyNode(self.curve)
+        if isinstance(self.curve, pm.nodetypes.Transform):
+            self.curve = self.curve.getShape()
 
-    # check type
-    if isinstance(curve, str):
-        curve = pm.PyNode(curve)
-    if isinstance(curve, pm.nodetypes.Transform):
-        curve = curve.getShape()
+        # base name
+        curveTransform = self.curve.getTransform()
+        self.baseName = '%s_wireCurve' % str(curveTransform)
 
-    curveTransform = curve.getTransform()
-    baseName = '%s_wireCurve' % str(curveTransform)
-    # rebuild the curve, d=3 minimum 5 cv's.
-    #curve = curveTransform.duplicate(name=('%s_dup_curve') % baseName)[0]
-    pm.rebuildCurve(curve, ch=False, rpo=True, rt=False, end=True, kr=False, kep=True,
-                    kt=False, s=curve.numCVs(), d=3, tol=0.01)
-    # get Shape
-    #curveDup = curveDup.getShape()
+    def buildSystem(self):
+        """
+        Construct the system
+        :return:
+        """
+        # rebuild the curve, d=3 minimum 5 cv's.
+        # curve = curveTransform.duplicate(name=('%s_dup_curve') % baseName)[0]
+        pm.rebuildCurve(self.curve, ch=False, rpo=True, rt=False, end=True, kr=False, kep=True,
+                        kt=False, s=self.curve.numCVs(), d=3, tol=0.01)
 
-    # get curve points and connect a transform
-    curvePoints = transformDriveCurveCV(curve)
+        # get curve points and connect a transform
+        self.curvePoints = transformDriveCurveCV(self.curve)
 
-    curveLength = curve.length()
+        curveLength = self.curve.length()
 
-    # create no transform group
-    noXformGrp = pm.group(empty=True, name='%s_noXform_grp' % baseName)
-    pm.parent(curvePoints, noXformGrp)  # addChild are given error with lists
-    noXformGrp.inheritsTransform.set(False)  # don't affect parents transforms
-    noXformGrp.addChild(curve.getTransform())
+        # create no transform group
+        self.noXformGrp = pm.group(empty=True, name='%s_noXform_grp' % self.baseName)
+        pm.parent(self.curvePoints, self.noXformGrp)  # addChild are given error with lists
+        self.noXformGrp.inheritsTransform.set(False)  # don't affect parents transforms
+        self.noXformGrp.addChild(self.curve.getTransform())
 
-    # create to controllers, one for extreme of the curve
-    controllers = []
-    for i in range(2):
-        ctr = createController('%s_%s_ctr' % (baseName, i+1), 'pole', 'general', getCurrentPath())
-        pointId = -1 if i%2 else 0  # check if is ini or final
-        nextPointId = -1 if i%2 else 1
-        pm.xform(ctr, ws=True, m=pm.xform(curvePoints[pointId], ws=True, q=True, m=True))
-        controllers.append(ctr)
-        # parent curve points
-        ctr.addChild(curvePoints[pointId])
-        ctr.addChild(curvePoints[pointId+nextPointId])
+        # create to controllers, one for extreme of the curve
+        self.controllers = []
+        for i in range(2):
+            ctr = pm.group(empty=True, name= '%s_%s_ctr' % (self.baseName, i + 1))
+            pointId = -1 if i % 2 else 0  # check if is ini or final
+            nextPointId = -1 if i % 2 else 1
+            pm.xform(ctr, ws=True, m=pm.xform(self.curvePoints[pointId], ws=True, q=True, m=True))
+            self.controllers.append(ctr)
+            # parent curve points
+            ctr.addChild(self.curvePoints[pointId])
+            ctr.addChild(self.curvePoints[pointId + nextPointId])
 
-    ## Vector controller node system ##
-    # base Node system, vector between child points of the controllers
-    # get transform worldSpace, point1
-    vectorProduct1 = pm.createNode('vectorProduct')  # this must be added later
-    vectorProduct1.operation.set(4)
-    curvePoints[1].worldMatrix[0].connect(vectorProduct1.matrix)
-    # point2
-    vectorProduct2 = pm.createNode('vectorProduct')
-    vectorProduct2.operation.set(4)
-    curvePoints[-2].worldMatrix[0].connect(vectorProduct2.matrix)
+        ## Vector controller node system ##
+        # base Node system, vector between child points of the controllers
+        # get transform worldSpace, point1
+        # vectorProduct1 must be added later
+        vectorBetCtr, vectorProduct1, vectorProduct2 = getVectorBetweenTransforms(self.curvePoints[1], self.curvePoints[-2],
+                                                                                  False)
 
-    # vector between
-    vectorBetCtr = pm.createNode('plusMinusAverage')
-    vectorBetCtr.operation.set(2)  # subtract
-    vectorProduct2.output.connect(vectorBetCtr.input3D[0])
-    vectorProduct1.output.connect(vectorBetCtr.input3D[1])
+        # distance between points, useful later
+        distanceBetween = pm.createNode('distanceBetween')
+        self.curvePoints[1].worldMatrix[0].connect(distanceBetween.inMatrix1)
+        self.curvePoints[-2].worldMatrix[0].connect(distanceBetween.inMatrix2)
 
-    # distance between points, useful later
-    distanceBetween = pm.createNode('distanceBetween')
-    curvePoints[1].worldMatrix[0].connect(distanceBetween.inMatrix1)
-    curvePoints[-2].worldMatrix[0].connect(distanceBetween.inMatrix2)
-
-    # cut the vector in sections, one per controller minus 1
-    cutVector = pm.createNode('multiplyDivide')
-    cutVector.operation.set(2)  # divide
-    for axis in 'XYZ':
-        cutVector.attr('input2%s' % axis).set(len(curvePoints)-1)  # set the divide value
-    vectorBetCtr.output3D.connect(cutVector.input1)
-
-    # multiplicator factor by distance, this is to make the points nearest to the line between controllers
-    # depending on distance
-    # offsetVector multiply formula: 1-((l-lini)/(L-lini)) min:0
-    substractDist = pm.createNode('plusMinusAverage')
-    substractDist.operation.set(2)  # subtract
-    distanceBetween.distance.connect(substractDist.input1D[0])
-    substractDist.input1D[1].set(distanceBetween.distance.get())
-
-    # Divide by curve length minus initial length
-    curveLengthDivide = pm.createNode('multiplyDivide')
-    curveLengthDivide.operation.set(2)  # divide
-    substractDist.output1D.connect(curveLengthDivide.input1X)
-    curveLengthDivide.input2X.set(curveLength - distanceBetween.distance.get())
-
-    # invert: 1 - curveLengthDivide
-    invertValue = pm.createNode('plusMinusAverage')
-    invertValue.operation.set(2)  # substract
-    invertValue.input1D[0].set(1)
-    curveLengthDivide.outputX.connect(invertValue.input1D[1])
-    # condition, 0 is the min value
-    condition = pm.createNode('condition')  # multiply this by the vector
-    condition.operation.set(3)  # greater or equal
-    condition.colorIfFalse.set(pm.datatypes.Point(0,0,0))
-    condition.secondTerm.set(0)
-    invertValue.output1D.connect(condition.firstTerm)
-    invertValue.output1D.connect(condition.colorIfTrueR)
-
-    ## per CV node system ##
-    for i, point in enumerate(curvePoints[2:-2]):
-        multiplyVector = pm.createNode('multiplyDivide')
-        multiplyVector.operation.set(1)  # multiply
+        # cut the vector in sections, one per controller minus 1
+        cutVector = pm.createNode('multiplyDivide')
+        cutVector.operation.set(2)  # divide
         for axis in 'XYZ':
-            multiplyVector.attr('input2%s' % axis).set(i+2)
-        cutVector.output.connect(multiplyVector.input1)
+            cutVector.attr('input2%s' % axis).set(len(self.curvePoints) - 1)  # set the divide value
+        vectorBetCtr.output.connect(cutVector.input1)
 
-        # add the first controller position
-        addPos1 = pm.createNode('plusMinusAverage')
-        multiplyVector.output.connect(addPos1.input3D[0])
-        vectorProduct1.output.connect(addPos1.input3D[1])
+        # multiplicator factor by distance, this is to make the points nearest to the line between controllers
+        # depending on distance
+        # offsetVector multiply formula: 1-((l-lini)/(L-lini)) min:0
+        substractDist = pm.createNode('plusMinusAverage')
+        substractDist.operation.set(2)  # subtract
+        distanceBetween.distance.connect(substractDist.input1D[0])
+        substractDist.input1D[1].set(distanceBetween.distance.get())
 
-        # multiply offset vector by multiplicator factor
-        # this way we transform the wire in a line depending on the distance
-        vectorMultipler = pm.createNode('multiplyDivide')
-        vectorMultipler.input1.set(point.translate.get() - pm.datatypes.Point(addPos1.output3D.get()))
-        for axis in 'XYZ':
-            condition.outColorR.connect(vectorMultipler.attr('input2%s' % axis))
+        # Divide by curve length minus initial length
+        curveLengthDivide = pm.createNode('multiplyDivide')
+        curveLengthDivide.operation.set(2)  # divide
+        substractDist.output1D.connect(curveLengthDivide.input1X)
+        curveLengthDivide.input2X.set(curveLength - distanceBetween.distance.get())
 
-        #pose final cv
-        posVector = pm.createNode('plusMinusAverage')
-        # vector between CV point and between controllers point
-        vectorMultipler.output.connect(posVector.input3D[0])
-        addPos1.output3D.connect(posVector.input3D[1])
+        # invert: 1 - curveLengthDivide
+        invertValue = pm.createNode('plusMinusAverage')
+        invertValue.operation.set(2)  # substract
+        invertValue.input1D[0].set(1)
+        curveLengthDivide.outputX.connect(invertValue.input1D[1])
+        # condition, 0 is the min value
+        condition = pm.createNode('condition')  # multiply this by the vector
+        condition.operation.set(3)  # greater or equal
+        condition.colorIfFalse.set(pm.datatypes.Point(0, 0, 0))
+        condition.secondTerm.set(0)
+        invertValue.output1D.connect(condition.firstTerm)
+        invertValue.output1D.connect(condition.colorIfTrueR)
 
-        # connect to point
-        posVector.output3D.connect(point.translate)
+        ## per CV node system ##
+        for i, point in enumerate(self.curvePoints[2:-2]):
+            multiplyVector = pm.createNode('multiplyDivide')
+            multiplyVector.operation.set(1)  # multiply
+            for axis in 'XYZ':
+                multiplyVector.attr('input2%s' % axis).set(i + 2)
+            cutVector.output.connect(multiplyVector.input1)
+
+            # add the first controller position
+            addPos1 = pm.createNode('plusMinusAverage')
+            multiplyVector.output.connect(addPos1.input3D[0])
+            vectorProduct1.output.connect(addPos1.input3D[1])
+
+            # multiply offset vector by multiplicator factor
+            # this way we transform the wire in a line depending on the distance
+            vectorMultipler = pm.createNode('multiplyDivide')
+            vectorMultipler.input1.set(point.translate.get() - pm.datatypes.Point(addPos1.output3D.get()))
+            for axis in 'XYZ':
+                condition.outColorR.connect(vectorMultipler.attr('input2%s' % axis))
+
+            # pose final cv
+            posVector = pm.createNode('plusMinusAverage')
+            # vector between CV point and between controllers point
+            vectorMultipler.output.connect(posVector.input3D[0])
+            addPos1.output3D.connect(posVector.input3D[1])
+
+            # connect to point
+            posVector.output3D.connect(point.translate)
+
+
+    def createControllers(self):
+        """
+        Add shapes to the controllers
+        :return:
+        """
+        if not hasattr(self, 'controllers'):
+            logger.info('Call buildSystem first')
+            return
+
+        for controller in self.controllers:
+            ctrShape = createController('tempCtr', 'pole', 'general', getCurrentPath())
+            shapes = ctrShape.getShapes()
+            for shape in shapes:
+                controller.addChild(shape, s=True, r=True)
+
+            pm.delete(ctrShape)
