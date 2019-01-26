@@ -49,6 +49,7 @@ def createRoots(listObjects, suffix='root'):
 
     return roots
 
+
 def createController (name, controllerType, chName, path, scale=1.0, colorIndex=4):
     """
     Args:
@@ -72,6 +73,7 @@ def createController (name, controllerType, chName, path, scale=1.0, colorIndex=
 
     pm.xform(controller, ws=True, m=transformMatrix)
     return controller
+
 
 def jointPointToController(joints, controller):
     """
@@ -110,6 +112,7 @@ def jointPointToController(joints, controller):
 
     return controllerList, rootList, pointConstraintList
 
+
 def lockAndHideAttr(obj, translate=False, rotate=False, scale=False):
     """
     lock and hide transform attributes
@@ -139,6 +142,7 @@ def lockAndHideAttr(obj, translate=False, rotate=False, scale=False):
             item.scale.lock()
             for axis in ('X', 'Y', 'Z'):
                 pm.setAttr('%s.scale%s' % (str(item), axis), channelBox=False, keyable=False)
+
 
 def arrangeListByHierarchy(itemList):
     """
@@ -170,6 +174,7 @@ def arrangeListByHierarchy(itemList):
     logger.debug('arrangeListByHierarchy: sorted: %s' % itemListArr)
 
     return itemListArr
+
 
 def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
     """
@@ -206,10 +211,12 @@ def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
 
     return plusIkFkBlend
 
+
 def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ikJoints, mainJoints, twsitMainJoints, nameInfo, main, poleVector=None):
     """
     create ik and fk stretch system with twistJoints, stretching by translate
     some lists must be of the same len()
+    TODO: restructure this, maybe should restructure autoRig ikFk -> ikFk Class?
     Args:
         fkObjList : roots fk controllers that will stretch (no the first root)
         fkDistances(list(float)): list of distances between chain elements 2 --
@@ -570,6 +577,7 @@ def twistJointsConnect(twistMainJoints, trackMain, nameInfo, pointCnstr=None):
 
 def relocatePole(pole, joints, distance=1):
     """
+    TODO: use pm math classes, and reduce codes
     relocate pole position for pole vector
     at the moment, valid for 3 joints.
     not calculate rotation
@@ -604,7 +612,6 @@ def relocatePole(pole, joints, distance=1):
 
     pole.setTransformation([xVector.x, xVector.y, xVector.z, 0, yVector.x, yVector.y, yVector.z, 0, poleVector.x, poleVector.y, poleVector.z, 0,
                        poleVector.x * distance + position2[0], poleVector.y * distance + position2[1], poleVector.z * distance + position2[2], 1])
-
 
 
 def snapCurveToPoints(points, curve, iterations=4, precision=0.05):
@@ -660,6 +667,7 @@ def snapCurveToPoints(points, curve, iterations=4, precision=0.05):
             mfnNurbsCurve.setCV(nearest[1], nearest[0] + mvector, OpenMaya.MSpace.kWorld)
 
     mfnNurbsCurve.updateCurve()
+
 
 def orientToPlane(matrix, plane=None, respectAxis=None):
     """
@@ -729,17 +737,17 @@ def orientToPlane(matrix, plane=None, respectAxis=None):
     return returnMatrix
 
 
-def stretchCurveVolume(curve, joints, nameInfo, main=None):
+def stretchCurveVolume(curve, joints, baseName, main=None):
     """
     Stretch neck head
     :param curve:
     :param joints:
-    :param nameInfo:
+    :param baseName:
     :param main:
     :return:
     """
-    curveInfo = pm.createNode('curveInfo', name='%s_curveInfo' % nameInfo)
-    scaleCurveInfo = pm.createNode('multiplyDivide', name='%s_scaleCurve_curveInfo' % nameInfo)
+    curveInfo = pm.createNode('curveInfo', name='%s_curveInfo' % baseName)
+    scaleCurveInfo = pm.createNode('multiplyDivide', name='%s_scaleCurve_curveInfo' % baseName)
     scaleCurveInfo.operation.set(2)  # divide
     # connect to scale compensate
     curveInfo.arcLength.connect(scaleCurveInfo.input1X)
@@ -751,7 +759,7 @@ def stretchCurveVolume(curve, joints, nameInfo, main=None):
     # influence
     # create anim curve to control scale influence
     # maybe this is better to do with a curveAttr
-    scaleInfluenceCurve = pm.createNode('animCurveTU', name='%s_stretch_animCurve' % nameInfo)
+    scaleInfluenceCurve = pm.createNode('animCurveTU', name='%s_stretch_animCurve' % baseName)
     scaleInfluenceCurve.addKeyframe(0, 0.0)
     scaleInfluenceCurve.addKeyframe(len(joints) // 2, 1.0)
     scaleInfluenceCurve.addKeyframe(len(joints) - 1, 0.0)
@@ -759,22 +767,22 @@ def stretchCurveVolume(curve, joints, nameInfo, main=None):
     for n, joint in enumerate(joints):
         jointNameSplit = str(joint).split('_')[1]
 
-        multiplyDivide = pm.createNode('multiplyDivide', name='%s_%s_stretch_multiplyDivide' % (nameInfo, jointNameSplit))
+        multiplyDivide = pm.createNode('multiplyDivide', name='%s_%s_stretch_multiplyDivide' % (baseName, jointNameSplit))
         multiplyDivide.operation.set(2)  # divide
         multiplyDivide.input1X.set(spineCurveLength)
         scaleCurveInfo.outputX.connect(multiplyDivide.input2X)
-        plusMinusAverage = pm.createNode('plusMinusAverage', name='%s_plusMinusAverage' % nameInfo)
+        plusMinusAverage = pm.createNode('plusMinusAverage', name='%s_plusMinusAverage' % baseName)
         multiplyDivide.outputX.connect(plusMinusAverage.input1D[0])
         plusMinusAverage.input1D[1].set(-1)
-        multiplyDivideInfluence = pm.createNode('multiplyDivide', name='%s_%s_stretch_multiplyDivide' % (nameInfo, jointNameSplit))
+        multiplyDivideInfluence = pm.createNode('multiplyDivide', name='%s_%s_stretch_multiplyDivide' % (baseName, jointNameSplit))
         plusMinusAverage.output1D.connect(multiplyDivideInfluence.input1X)
         # frame cache
-        frameCache = pm.createNode('frameCache', name='%s_%s_stretch_frameCache' % (nameInfo, jointNameSplit))
+        frameCache = pm.createNode('frameCache', name='%s_%s_stretch_frameCache' % (baseName, jointNameSplit))
         scaleInfluenceCurve.output.connect(frameCache.stream)
         frameCache.varyTime.set(n)
         frameCache.varying.connect(multiplyDivideInfluence.input2X)
         # plus 1
-        plusMinusAverageToJoint = pm.createNode('plusMinusAverage', name='%s_%s_stretch_plusMinusAverage' % (nameInfo, jointNameSplit))
+        plusMinusAverageToJoint = pm.createNode('plusMinusAverage', name='%s_%s_stretch_plusMinusAverage' % (baseName, jointNameSplit))
         multiplyDivideInfluence.outputX.connect(plusMinusAverageToJoint.input1D[0])
         plusMinusAverageToJoint.input1D[1].set(1)
 
@@ -903,6 +911,7 @@ def twistJointConnect(mainJointList, twistList, joints, twistSyncJoints):
                 pm.orientConstraint(twistJnt, skinJoint, maintainOffset=False)
                 pm.pointConstraint(twistJnt, skinJoint, maintainOffset=False)
 
+
 def getSkinedMeshFromJoint(joint):
     """
     Find meshes affected by the joint
@@ -919,6 +928,7 @@ def getSkinedMeshFromJoint(joint):
         meshes += skin.getGeometry()
 
     return set(meshes)
+
 
 def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
     """
@@ -978,6 +988,7 @@ def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
         meshVertIt.next()
 
     return vertexIndexes
+
 
 def smoothDeformerWeights(deformer):
     """
@@ -1076,6 +1087,7 @@ def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
 
     return wire, curve
 
+
 def transformDriveCurveCV(curve):
     """
     Connect transformations to each Curve Vertex point
@@ -1100,6 +1112,7 @@ def transformDriveCurveCV(curve):
         transforms.append(transform)
 
     return transforms
+
 
 def latticeBendDeformer(lattice, controller=None):
     """
@@ -1266,6 +1279,7 @@ def latticeBendDeformer(lattice, controller=None):
 
     return [scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot]
 
+
 def dotBasedPS(driverVector, drivenVector):
     """
     Create a conection based on a space deform to drive attributes
@@ -1356,6 +1370,7 @@ def getVectorFromMatrix(transform, vector):
 
     return driverVecProduct
 
+
 def jointChain(length=None, joints=10, curve=None):
     """
     create a joint chain
@@ -1367,7 +1382,7 @@ def jointChain(length=None, joints=10, curve=None):
     # to avoid errors clear selection
     pm.select(cl=True)
 
-    jointsList = []  # store joints
+    jointsList = []  # to store joints
 
     # if curve arg
     if curve:
@@ -1561,6 +1576,7 @@ def squareController(heigh, width, normalAxis= 'x', color=None):
 
     return sqrController
 
+
 def getCurrentPath():
     """
     Get the ARCore.py path
@@ -1573,11 +1589,11 @@ def getCurrentPath():
     #print os.path.abspath(inspect.getfile(inspect.currentframe()))
     return os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
+
 #############
 ## SYSTEMS ##
 #############
 # classes to automatize rig systems
-
 class System(object):
     """
     Base abstract class for all systems
@@ -1623,7 +1639,7 @@ class System(object):
         pm.delete(ctrShapesTrns)
 
 
-class VariableFk (System):
+class VariableFk(System):
     """
     Create a variableFk system
     :param curve:
