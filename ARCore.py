@@ -1513,215 +1513,6 @@ def curveToSurface(curve, width=5.0, steps=10):
     return loft
 
 
-def variableFk(jointList, curve=None, numControllers=3, name='variableFk'):
-    """
-    TODO: without curve
-    TODO: class
-    Create a variableFk system
-    :param curve:
-    :param numJoints:
-    :return:
-    """
-    if not curve:
-        curve = createCurveFromTransforms(jointList, 3)[1]
-    else:
-        # check data type
-        if isinstance(curve, str):
-            curve = pm.PyNode(curve)
-        if isinstance(curve, pm.nodetypes.Transform):
-            curve = curve.getShape()
-
-    # container for the system, joints
-    systemGrp = pm.group(empty=True, name='%s_grp' %name)
-
-    # container of the controllers and surface
-    controllerGrp = pm.group(empty=True, name='%s_ctr_grp' %name)
-    controllerGrp.inheritsTransform.set(False)
-    systemGrp.addChild(controllerGrp)
-
-    numJoints = len(jointList)
-
-    ## duplicate joints ##
-    jointsSkin = [joint.duplicate(po=True)[0] for joint in jointList]
-    for i in range(len(jointsSkin)-1):
-        jointsSkin[i].addChild(jointsSkin[i+1])
-    systemGrp.addChild(jointsSkin[0])
-
-    # create system controller
-    mainCtr = squareController(8, 8, 'x', 4)
-    systemGrp.addChild(mainCtr)  # add controller to systemGrp
-    pm.xform(mainCtr, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
-    mainCtr.addChild(jointsSkin[0])  # add jointSkin chain
-
-    #joint skin roots, for conserve direction
-    jointsSkinRoots = createRoots(jointsSkin)
-    # root of main ctr
-    mainCtrRoot = createRoots([mainCtr])
-
-    # create nurbs surface from curve
-    surface = curveToSurface(curve, 2.5, numJoints)
-    surfaceShape = surface.getShape()
-
-    controllerGrp.addChild(surface)
-
-    # connect joints and surface by skinCluster
-    skinCluster = pm.skinCluster(jointsSkin, surfaceShape, mi=1)
-
-    ## create controllers ##
-    controllerList=[]
-    jointsRoots = []
-    for i in range(numControllers):
-        # normal x axis
-        controller = squareController(5.0, 5.0,'x', 13)
-        # copy rotation from joint
-        pm.xform(controller, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
-        # create fallof attr
-        pm.addAttr(controller, ln='fallof', sn='fallof', minValue=0.01, type='float',
-                   defaultValue=0.2, maxValue=1.0, k=True)
-
-        # create a root on each joint for controller, each controller will be connected on one root
-        jointsRoots.append(createRoots(jointsSkin, '_auto'))
-
-        controllerList.append(controller)
-        controllerGrp.addChild(controller)
-
-    # root controllers
-    controllerRoots = createRoots(controllerList)
-
-
-    ## snap root to surface ##
-    for i, root in enumerate(controllerRoots):
-        pointOnSurf = pm.createNode('pointOnSurfaceInfo')
-        vValue = surfaceShape.maxValueV.get()/2
-        pointOnSurf.parameterV.set(vValue)
-        surfaceShape.worldSpace[0].connect(pointOnSurf.inputSurface)
-
-        # construct two transform matrix with fourByFourMatrix
-        matrixNurbs = pm.createNode('fourByFourMatrix')
-        matrixNurbIni = pm.createNode('fourByFourMatrix')  # with this we calculate the offset
-        for n, attr in enumerate(['normalizedTangentU', 'normalizedNormal', 'normalizedTangentV', 'position']):
-            for j, axis in enumerate('XYZ'):
-                pointOnSurf.attr('%s%s'%(attr, axis)).connect(matrixNurbs.attr('in%s%s' %(n,j)))
-                if n<3:
-                    # store matrix info
-                    matrixNurbIni.attr('in%s%s' %(n,j)).set(pointOnSurf.attr('%s%s'%(attr, axis)).get())
-
-        # store initial root matrix
-        rootMatrix = pm.xform(root, ws=True, q=True, m=True)
-        rootMatrixNode = pm.createNode('fourByFourMatrix')
-        for n, val in enumerate(rootMatrix):
-            rowPos = n % 4
-            colPos = n // 4
-            if colPos==3 and rowPos < 3:
-                val=0
-            elif colPos==3 and rowPos==3:
-                val=1
-            else:
-                val = val
-            rootMatrixNode.attr('in%s%s' % (colPos, rowPos)).set(val)
-
-        # calcOffset
-        inverseNode = pm.createNode('inverseMatrix')
-        rootMatrixNode.output.connect(inverseNode.inputMatrix)
-        offsetNode = pm.createNode('multMatrix')
-        matrixNurbIni.output.connect(offsetNode.matrixIn[0])
-        inverseNode.outputMatrix.connect(offsetNode.matrixIn[1])
-
-        # use mult matrix to add the offset
-        multMatrix = pm.createNode('multMatrix')
-        offsetNode.matrixSum.connect(multMatrix.matrixIn[0])
-        matrixNurbs.output.connect(multMatrix.matrixIn[1])
-
-        # now we need to read the matrix
-        decompose = pm.createNode('decomposeMatrix')
-        multMatrix.matrixSum.connect(decompose.inputMatrix)
-        # and connect to the root controller
-        decompose.outputTranslate.connect(root.translate)
-        decompose.outputRotate.connect(root.rotate)
-
-        # add slide attr to controller
-        defaultSlide = (i+1) / (float(numControllers+1))
-        pm.addAttr(controllerList[i], ln='slide', sn='slide', minValue=0.0, type='float', defaultValue=defaultSlide, maxValue=1.0, k=True)
-        # connect to Uparamenter
-        controllerList[i].slide.connect(pointOnSurf.parameterU)
-
-    # TODO add system general control
-    # connect variableFk formula
-    for i, rootChain in enumerate(jointsRoots):
-        controller = controllerList[i]
-        controllerRoot = controllerRoots[i]
-
-        # total joints affected
-        totalJointsA = pm.createNode('multiplyDivide')
-        totalJointsA.operation.set(1)  # multiply
-        totalJointsA.input1X.set(numJoints / 2)  # double
-        controller.fallof.connect(totalJointsA.input2X)
-
-        for j, rootJoint in enumerate(rootChain):
-            # calculate the joint point
-            jointPoint = j/(numJoints-1.0)  # range 0<->1 review
-            rootJoint.rename('%s_jointOffset' %controllerRoot)
-
-            # distance from controller
-            distanceCtr = pm.createNode('plusMinusAverage')
-            distanceCtr.operation.set(2)  # substract
-            distanceCtr.input1D[0].set(jointPoint)
-            controller.slide.connect(distanceCtr.input1D[1])
-            ## absoluteVal ##
-            square = pm.createNode('multiplyDivide')
-            square.operation.set(3)  # power
-            square.input2X.set(2)  # square
-            distanceCtr.output1D.connect(square.input1X)
-            # squareRoot
-            squareRoot = pm.createNode('multiplyDivide')
-            squareRoot.operation.set(3)  # power
-            squareRoot.input2X.set(.5)  # square
-            square.outputX.connect(squareRoot.input1X)
-
-            ## compare with fallof ## ((f-(|p-c|))/f)
-            fallofDst = pm.createNode('plusMinusAverage')
-            fallofDst.operation.set(2)  # subtract
-            controller.fallof.connect(fallofDst.input1D[0])
-            squareRoot.outputX.connect(fallofDst.input1D[1])
-            # if the result < 0, stay in 0
-            condition = pm.createNode('condition')
-            condition.operation.set(2)  # greater than
-            condition.secondTerm.set(0)
-            condition.colorIfFalseR.set(0)
-            fallofDst.output1D.connect(condition.firstTerm)
-            fallofDst.output1D.connect(condition.colorIfTrueR)
-
-            ## normalize the resutlt ##
-            rotationMult = pm.createNode('multiplyDivide')
-            rotationMult.operation.set(2)  # divide
-            condition.outColorR.connect(rotationMult.input1X)
-            controller.fallof.connect(rotationMult.input2X)
-
-            # divide normalized value
-            distRotation = pm.createNode('multiplyDivide')
-            distRotation.operation.set(2)  # divide
-            rotationMult.outputX.connect(distRotation.input1X)
-            totalJointsA.outputX.connect(distRotation.input2X)
-
-            ## connect to root joint and controller rotation ##
-            rotationRoot = pm.createNode('multiplyDivide')
-            rotationRoot.operation.set(1)  # multiply
-            # multiply with controller
-            controller.rotate.connect(rotationRoot.input1)
-            for axis in 'XYZ':
-                distRotation.outputX.connect(rotationRoot.attr('input2%s' % axis))
-            # connect to to root
-            rotationRoot.output.connect(rootJoint.rotate)
-
-    # lock and hide attributes
-    lockAndHideAttr(controllerList, True, False, True)
-
-    # connect joints
-    for i, joint in enumerate(jointList):
-        pm.orientConstraint(jointsSkin[i], joint, maintainOffset=False)
-        pm.pointConstraint(jointsSkin[i], joint, maintainOffset=False)
-
-
 def createCurveFromTransforms(transforms, degree=3):
     """
     create curve from transform list
@@ -1782,8 +1573,279 @@ def getCurrentPath():
     #print os.path.abspath(inspect.getfile(inspect.currentframe()))
     return os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
+#############
+## SYSTEMS ##
+#############
+# classes to automatize rig systems
 
-class wireCurve(object):
+class System(object):
+    """
+    Base abstract class for all systems
+    """
+    def __init__(self, baseName):
+        # here must be added the controllers
+        # controllers must be empty transform nodes
+        self.controllers=[]
+        self.baseName = baseName
+
+    def buildSystem(self):
+        """
+        this method must be override.
+        here must be the system construction.
+        :return:
+        """
+        pass
+
+    def createControllers(self, ctrType='pole'):
+        """
+        Add shapes to the controllers.
+        Controllers should be empty transforms nodes
+        TODO: Option to add custom controllers
+        :return:
+        """
+        if not self.controllers:
+            logger.info('Call buildSystem first')
+            return
+
+        if type(ctrType) == str:
+            ctrShapesTrns = createController('tempCtr', ctrType, 'general', getCurrentPath())
+            ctrShapes = ctrShapesTrns.getShapes()
+
+        elif type(ctrType) == pm.nodetypes.Transform:
+            ctrShapesTrns = ctrType
+            ctrShapes = ctrType.getShapes()
+
+        for controller in self.controllers:
+            for ctrShape in ctrShapes:
+                controller.addChild(ctrShape, add=True, s=True)
+
+        # delete transform node of the controller
+        pm.delete(ctrShapesTrns)
+
+
+class VariableFk (System):
+    """
+    Create a variableFk system
+    :param curve:
+    :param numJoints:
+    :return:
+    """
+    def __init__(self, jointList, curve=None, numControllers=3, baseName='variableFk'):
+        if not curve:
+            curve = createCurveFromTransforms(jointList, 3)[1]
+        else:
+            # check data type
+            if isinstance(curve, str):
+                curve = pm.PyNode(curve)
+            if isinstance(curve, pm.nodetypes.Transform):
+                curve = curve.getShape()
+
+        # call base __init__
+        super(VariableFk, self).__init__(baseName)
+
+        # arg attr
+        self.curve = curve
+        self.jointList = jointList
+        self.numControllers = numControllers
+
+        # container for the system, joints
+        self.systemGrp = pm.group(empty=True, name='%s_grp' % self.baseName)
+        # container of the controllers and surface
+        self.controllerGrp = pm.group(empty=True, name='%s_ctr_grp' % self.baseName)
+        self.controllerGrp.inheritsTransform.set(False)
+        self.systemGrp.addChild(self.controllerGrp)
+
+
+    def buildSystem(self):
+        """
+        Build System
+        :return:
+        """
+        numJoints = len(self.jointList)
+
+        ## duplicate joints ##
+        jointsSkin = [joint.duplicate(po=True)[0] for joint in self.jointList]
+        for i in range(len(jointsSkin) - 1):
+            jointsSkin[i].addChild(jointsSkin[i + 1])
+        self.systemGrp.addChild(jointsSkin[0])
+
+        # create system controller
+        mainCtr = squareController(8, 8, 'x', 4)
+        self.systemGrp.addChild(mainCtr)  # add controller to systemGrp
+        pm.xform(mainCtr, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
+        mainCtr.addChild(jointsSkin[0])  # add jointSkin chain
+
+        # joint skin roots, for conserve direction
+        jointsSkinRoots = createRoots(jointsSkin)
+        # root of main ctr
+        mainCtrRoot = createRoots([mainCtr])
+
+        # create nurbs surface from curve
+        surface = curveToSurface(self.curve, 2.5, numJoints)
+        surfaceShape = surface.getShape()
+
+        self.controllerGrp.addChild(surface)
+
+        # connect joints and surface by skinCluster
+        skinCluster = pm.skinCluster(jointsSkin, surfaceShape, mi=1)
+
+        ## create controllers ##
+        self.controllerList = []
+        jointsRoots = []
+        for i in range(self.numControllers):
+            # normal x axis
+            #controller = squareController(5.0, 5.0, 'x', 13)
+            controller = pm.group(empty=True, name='%s_%s_ctr' % (self.baseName, i+1))
+            # copy rotation from joint
+            pm.xform(controller, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
+            # create fallof attr
+            pm.addAttr(controller, ln='fallof', sn='fallof', minValue=0.01, type='float',
+                       defaultValue=0.2, maxValue=1.0, k=True)
+
+            # create a root on each joint for controller, each controller will be connected on one root
+            jointsRoots.append(createRoots(jointsSkin, '_auto'))
+
+            self.controllerList.append(controller)
+            self.controllerGrp.addChild(controller)
+
+        # root controllers
+        controllerRoots = createRoots(self.controllerList)
+
+        ## snap root to surface ##
+        for i, root in enumerate(controllerRoots):
+            pointOnSurf = pm.createNode('pointOnSurfaceInfo')
+            vValue = surfaceShape.maxValueV.get() / 2
+            pointOnSurf.parameterV.set(vValue)
+            surfaceShape.worldSpace[0].connect(pointOnSurf.inputSurface)
+
+            # construct two transform matrix with fourByFourMatrix
+            matrixNurbs = pm.createNode('fourByFourMatrix')
+            matrixNurbIni = pm.createNode('fourByFourMatrix')  # with this we calculate the offset
+            for n, attr in enumerate(['normalizedTangentU', 'normalizedNormal', 'normalizedTangentV', 'position']):
+                for j, axis in enumerate('XYZ'):
+                    pointOnSurf.attr('%s%s' % (attr, axis)).connect(matrixNurbs.attr('in%s%s' % (n, j)))
+                    if n < 3:
+                        # store matrix info
+                        matrixNurbIni.attr('in%s%s' % (n, j)).set(pointOnSurf.attr('%s%s' % (attr, axis)).get())
+
+            # store initial root matrix
+            rootMatrix = pm.xform(root, ws=True, q=True, m=True)
+            rootMatrixNode = pm.createNode('fourByFourMatrix')
+            for n, val in enumerate(rootMatrix):
+                rowPos = n % 4
+                colPos = n // 4
+                if colPos == 3 and rowPos < 3:
+                    val = 0
+                elif colPos == 3 and rowPos == 3:
+                    val = 1
+                else:
+                    val = val
+                rootMatrixNode.attr('in%s%s' % (colPos, rowPos)).set(val)
+
+            # calcOffset
+            inverseNode = pm.createNode('inverseMatrix')
+            rootMatrixNode.output.connect(inverseNode.inputMatrix)
+            offsetNode = pm.createNode('multMatrix')
+            matrixNurbIni.output.connect(offsetNode.matrixIn[0])
+            inverseNode.outputMatrix.connect(offsetNode.matrixIn[1])
+
+            # use mult matrix to add the offset
+            multMatrix = pm.createNode('multMatrix')
+            offsetNode.matrixSum.connect(multMatrix.matrixIn[0])
+            matrixNurbs.output.connect(multMatrix.matrixIn[1])
+
+            # now we need to read the matrix
+            decompose = pm.createNode('decomposeMatrix')
+            multMatrix.matrixSum.connect(decompose.inputMatrix)
+            # and connect to the root controller
+            decompose.outputTranslate.connect(root.translate)
+            decompose.outputRotate.connect(root.rotate)
+
+            # add slide attr to controller
+            defaultSlide = (i + 1) / (float(self.numControllers + 1))
+            pm.addAttr(self.controllerList[i], ln='slide', sn='slide', minValue=0.0, type='float', defaultValue=defaultSlide,
+                       maxValue=1.0, k=True)
+            # connect to Uparamenter
+            self.controllerList[i].slide.connect(pointOnSurf.parameterU)
+
+        # TODO add system general control
+        # connect variableFk formula
+        for i, rootChain in enumerate(jointsRoots):
+            controller = self.controllerList[i]
+            controllerRoot = controllerRoots[i]
+
+            # total joints affected
+            totalJointsA = pm.createNode('multiplyDivide')
+            totalJointsA.operation.set(1)  # multiply
+            totalJointsA.input1X.set(numJoints / 2)  # double
+            controller.fallof.connect(totalJointsA.input2X)
+
+            for j, rootJoint in enumerate(rootChain):
+                # calculate the joint point
+                jointPoint = j / (numJoints - 1.0)  # range 0<->1 review
+                rootJoint.rename('%s_jointOffset' % controllerRoot)
+
+                # distance from controller
+                distanceCtr = pm.createNode('plusMinusAverage')
+                distanceCtr.operation.set(2)  # substract
+                distanceCtr.input1D[0].set(jointPoint)
+                controller.slide.connect(distanceCtr.input1D[1])
+                ## absoluteVal ##
+                square = pm.createNode('multiplyDivide')
+                square.operation.set(3)  # power
+                square.input2X.set(2)  # square
+                distanceCtr.output1D.connect(square.input1X)
+                # squareRoot
+                squareRoot = pm.createNode('multiplyDivide')
+                squareRoot.operation.set(3)  # power
+                squareRoot.input2X.set(.5)  # square
+                square.outputX.connect(squareRoot.input1X)
+
+                ## compare with fallof ## ((f-(|p-c|))/f)
+                fallofDst = pm.createNode('plusMinusAverage')
+                fallofDst.operation.set(2)  # subtract
+                controller.fallof.connect(fallofDst.input1D[0])
+                squareRoot.outputX.connect(fallofDst.input1D[1])
+                # if the result < 0, stay in 0
+                condition = pm.createNode('condition')
+                condition.operation.set(2)  # greater than
+                condition.secondTerm.set(0)
+                condition.colorIfFalseR.set(0)
+                fallofDst.output1D.connect(condition.firstTerm)
+                fallofDst.output1D.connect(condition.colorIfTrueR)
+
+                ## normalize the resutlt ##
+                rotationMult = pm.createNode('multiplyDivide')
+                rotationMult.operation.set(2)  # divide
+                condition.outColorR.connect(rotationMult.input1X)
+                controller.fallof.connect(rotationMult.input2X)
+
+                # divide normalized value
+                distRotation = pm.createNode('multiplyDivide')
+                distRotation.operation.set(2)  # divide
+                rotationMult.outputX.connect(distRotation.input1X)
+                totalJointsA.outputX.connect(distRotation.input2X)
+
+                ## connect to root joint and controller rotation ##
+                rotationRoot = pm.createNode('multiplyDivide')
+                rotationRoot.operation.set(1)  # multiply
+                # multiply with controller
+                controller.rotate.connect(rotationRoot.input1)
+                for axis in 'XYZ':
+                    distRotation.outputX.connect(rotationRoot.attr('input2%s' % axis))
+                # connect to root
+                rotationRoot.output.connect(rootJoint.rotate)
+
+        # lock and hide attributes
+        lockAndHideAttr(self.controllerList, True, False, True)
+
+        # connect joints
+        for i, joint in enumerate(self.jointList):
+            pm.orientConstraint(jointsSkin[i], joint, maintainOffset=False)
+            pm.pointConstraint(jointsSkin[i], joint, maintainOffset=False)
+
+
+class WireCurve(System):
     """
     Build a wire system on a curve, trying to maintain the length of the curve when move extremes.
     :param curve(str or pm):
@@ -1791,7 +1853,13 @@ class wireCurve(object):
     TODO: scalable
     TODO: review formula, when vector length is minor than ini value, it grows to much
     """
-    def __init__(self, curve):
+    def __init__(self, curve, baseName='wireSystem'):
+        """
+        Constructor
+        :param curve:
+        :param baseName: base name of the system
+        """
+
         self.curve = curve
         # check type
         if isinstance(self.curve, str):
@@ -1799,9 +1867,9 @@ class wireCurve(object):
         if isinstance(self.curve, pm.nodetypes.Transform):
             self.curve = self.curve.getShape()
 
-        # base name
-        curveTransform = self.curve.getTransform()
-        self.baseName = '%s_wireCurve' % str(curveTransform)
+        # call base __init__
+        super(VariableFk, self).__init__(baseName)
+
 
     def buildSystem(self):
         """
@@ -1911,20 +1979,3 @@ class wireCurve(object):
             # connect to point
             posVector.output3D.connect(point.translate)
 
-
-    def createControllers(self):
-        """
-        Add shapes to the controllers
-        :return:
-        """
-        if not hasattr(self, 'controllers'):
-            logger.info('Call buildSystem first')
-            return
-
-        for controller in self.controllers:
-            ctrShape = createController('tempCtr', 'pole', 'general', getCurrentPath())
-            shapes = ctrShape.getShapes()
-            for shape in shapes:
-                controller.addChild(shape, s=True, r=True)
-
-            pm.delete(ctrShape)
