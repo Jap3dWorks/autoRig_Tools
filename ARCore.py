@@ -1088,27 +1088,27 @@ def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
     return wire, curve
 
 
-def transformDriveCurveCV(curve):
+def transformDriveNurbObjectCV(nurbObject):
     """
     Connect transformations to each Curve Vertex point
     :param curve(str or pm):
     :return (list): list with created transformations
     """
     # check curve type data
-    if isinstance(curve, str):
-        curve = pm.PyNode(curve)
-    if isinstance(curve, pm.nodetypes.Transform):
-        curve = curve.getShape()
+    if isinstance(nurbObject, str):
+        nurbObject = pm.PyNode(nurbObject)
+    if isinstance(nurbObject, pm.nodetypes.Transform):
+        nurbObject = nurbObject.getShape()
 
-    baseName = ('%s_cv') % str(curve.getTransform())
+    baseName = ('%s_cv') % str(nurbObject.getTransform())
 
     transforms = []
-    for n, point in enumerate(curve.getCVs()):
+    for n, point in enumerate(nurbObject.getCVs()):
         transform = pm.group(empty=True, name='%s%s_grp' % (baseName, n))
         transform.setTranslation(point)
         decomposeMatrix = pm.createNode('decomposeMatrix')
         transform.worldMatrix[0].connect(decomposeMatrix.inputMatrix)
-        decomposeMatrix.outputTranslate.connect(curve.controlPoints[n])
+        decomposeMatrix.outputTranslate.connect(nurbObject.controlPoints[n])
         transforms.append(transform)
 
     return transforms
@@ -1601,8 +1601,12 @@ class System(object):
     def __init__(self, baseName):
         # here must be added the controllers
         # controllers must be empty transform nodes
-        self.controllers=[]
+        self.controllers = []
         self.baseName = baseName
+        self.systemGrp = '%s_grp' % self.baseName  # parent of the system
+        self.noXformGrp = '%s_noXform_grp' % self.baseName  # parent of noxform objects
+        self.controllerGrp = '%s_controllers_grp' % self.baseName  # parent of controllers
+
 
     def buildSystem(self):
         """
@@ -1612,7 +1616,7 @@ class System(object):
         """
         pass
 
-    def createControllers(self, ctrType='pole'):
+    def createControllers(self, ctrType='pole', scale=1):
         """
         Add shapes to the controllers.
         Controllers should be empty transforms nodes
@@ -1624,7 +1628,7 @@ class System(object):
             return
 
         if type(ctrType) == str:
-            ctrShapesTrns = createController('tempCtr', ctrType, 'general', getCurrentPath())
+            ctrShapesTrns = createController('tempCtr', ctrType, 'general', getCurrentPath(), scale)
             ctrShapes = ctrShapesTrns.getShapes()
 
         elif type(ctrType) == pm.nodetypes.Transform:
@@ -1637,6 +1641,79 @@ class System(object):
 
         # delete transform node of the controller
         pm.delete(ctrShapesTrns)
+
+    def createControllersGrp(self):
+        self.controllerGrp = pm.group(empty=True, name=self.controllerGrp)
+
+    def createSystemGrp(self):
+        """
+        must be called at the end
+        :return:
+        """
+        self.systemGrp = pm.group(empty=True, name=self.systemGrp)
+        # try parent ctr grp
+        try:
+            self.systemGrp.addChild(self.controllerGrp)
+        except:
+            pass
+        # try parent noXform grp
+        try:
+            self.systemGrp.addChild(self.noXformGrp)
+        except:
+            pass
+
+    def createNoXformGrp(self):
+        self.noXformGrp = pm.group(empty=True, name=self.noXformGrp)
+        self.noXformGrp.inheritsTransform.set(False)  # don't affect parents transforms
+
+
+class nurbsStripPointController(System):
+    """
+    Create simple controllers for a nurb surface strip
+    """
+    def __init__(self, nurbsStrip, baseName='nurbsPointController'):
+        # check dataType
+        if isinstance(nurbsStrip, str):
+            nurbsStrip = pm.PyNode(nurbsStrip)
+        if isinstance(nurbsStrip, pm.nodetypes.Transform):
+            nurbsStrip = nurbsStrip.getShape()
+
+        self.nurbsStrip = nurbsStrip
+
+        # base init
+        super(nurbsStripPointController, self).__init__(baseName)
+
+    def buildSystem(self):
+        # get CV points
+        nurbsStripTransforms = transformDriveNurbObjectCV(self.nurbsStrip)
+
+        self.createControllersGrp()
+
+        # create first level controllers
+        firstLvlCtr = []
+        for i in range(0, len(nurbsStripTransforms),2):
+            ctr1 = pm.group(empty=True, name='%s_ctr%s1_ctr' % (self.baseName, i/2))
+            ctr2 = pm.group(empty=True, name='%s_ctr%s2_ctr' % (self.baseName, i/2))
+
+            # create general ctr
+            generalCtr = pm.group(empty=True, name='%s_ctr%s3_ctr' % (self.baseName, i / 2))
+            # pos general ctr
+            pm.xform(generalCtr, ws=True, m=pm.xform(nurbsStripTransforms[i], ws=True, q=True, m=True))
+            generalCtr.setTranslation((nurbsStripTransforms[i].getTranslation() + nurbsStripTransforms[i+1].getTranslation()) / 2)
+            self.controllers.append(generalCtr)
+            # child ctrGrp
+            self.controllerGrp.addChild(generalCtr)
+
+            # copy transforms and parent ctr
+            for j, ctr in enumerate([ctr1,ctr2]):
+                pm.xform(ctr, ws=True, m=pm.xform(nurbsStripTransforms[i+j], ws=True, q=True, m=True))
+                ctr.addChild(nurbsStripTransforms[i+j])
+                generalCtr.addChild(ctr)
+                # append to ctr list
+                self.controllers.append(ctr)
+
+        # create roots
+        createRoots(self.controllers)
 
 
 class VariableFk(System):
@@ -1664,12 +1741,11 @@ class VariableFk(System):
         self.jointList = jointList
         self.numControllers = numControllers
 
-        # container for the system, joints
-        self.systemGrp = pm.group(empty=True, name='%s_grp' % self.baseName)
         # container of the controllers and surface
-        self.controllerGrp = pm.group(empty=True, name='%s_ctr_grp' % self.baseName)
-        self.controllerGrp.inheritsTransform.set(False)
-        self.systemGrp.addChild(self.controllerGrp)
+        self.createNoXformGrp()
+
+        # container for the system, joints
+        self.createControllersGrp()
 
 
     def buildSystem(self):
@@ -1683,11 +1759,11 @@ class VariableFk(System):
         jointsSkin = [joint.duplicate(po=True)[0] for joint in self.jointList]
         for i in range(len(jointsSkin) - 1):
             jointsSkin[i].addChild(jointsSkin[i + 1])
-        self.systemGrp.addChild(jointsSkin[0])
+        self.controllerGrp.addChild(jointsSkin[0])
 
         # create system controller
         mainCtr = squareController(8, 8, 'x', 4)
-        self.systemGrp.addChild(mainCtr)  # add controller to systemGrp
+        self.controllerGrp.addChild(mainCtr)  # add controller to ctrGrp
         pm.xform(mainCtr, ws=True, m=pm.xform(jointsSkin[0], q=True, ws=True, m=True))
         mainCtr.addChild(jointsSkin[0])  # add jointSkin chain
 
@@ -1700,7 +1776,7 @@ class VariableFk(System):
         surface = curveToSurface(self.curve, 2.5, numJoints)
         surfaceShape = surface.getShape()
 
-        self.controllerGrp.addChild(surface)
+        self.noXformGrp.addChild(surface)
 
         # connect joints and surface by skinCluster
         skinCluster = pm.skinCluster(jointsSkin, surfaceShape, mi=1)
@@ -1722,7 +1798,7 @@ class VariableFk(System):
             jointsRoots.append(createRoots(jointsSkin, '_auto'))
 
             self.controllerList.append(controller)
-            self.controllerGrp.addChild(controller)
+            self.noXformGrp.addChild(controller)
 
         # root controllers
         controllerRoots = createRoots(self.controllerList)
@@ -1898,14 +1974,13 @@ class WireCurve(System):
                         kt=False, s=self.curve.numCVs(), d=3, tol=0.01)
 
         # get curve points and connect a transform
-        self.curvePoints = transformDriveCurveCV(self.curve)
+        self.curvePoints = transformDriveNurbObjectCV(self.curve)
 
         curveLength = self.curve.length()
 
         # create no transform group
-        self.noXformGrp = pm.group(empty=True, name='%s_noXform_grp' % self.baseName)
+        self.createNoXformGrp()
         pm.parent(self.curvePoints, self.noXformGrp)  # addChild are given error with lists
-        self.noXformGrp.inheritsTransform.set(False)  # don't affect parents transforms
         self.noXformGrp.addChild(self.curve.getTransform())
 
         # create to controllers, one for extreme of the curve
