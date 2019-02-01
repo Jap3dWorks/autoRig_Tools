@@ -12,6 +12,19 @@ logger = logging.getLogger('ARCore:')
 logger.setLevel(logging.DEBUG)
 
 
+def getCurrentPath():
+    """
+    Get the ARCore.py path
+    :return: ARCore.py path
+    """
+    #print __name__
+    #print inspect.currentframe()
+    #print inspect.getfile(inspect.currentframe())
+    #print os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+    #print os.path.abspath(inspect.getfile(inspect.currentframe()))
+    return os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+
+
 def createRoots(listObjects, suffix='root'):
     """
     Create root on elements, respecting their present hierarchy.
@@ -113,37 +126,6 @@ def jointPointToController(joints, controller):
     return controllerList, rootList, pointConstraintList
 
 
-def lockAndHideAttr(obj, translate=False, rotate=False, scale=False):
-    """
-    lock and hide transform attributes
-    # TODO: add limit operations
-    Args:
-        obj(pm.Trasform): Element to lock and hide
-        translate(True): true, lock and hide translate
-        rotate(True): true, lock and hide rotate
-        scale(True): true, lock and hide scale
-    """
-    if isinstance(obj, list):
-        itemList = obj
-    else:
-        itemList = []
-        itemList.append(obj)
-
-    for item in itemList:
-        if translate:
-            item.translate.lock()
-            for axis in ('X', 'Y', 'Z'):
-                pm.setAttr('%s.translate%s' % (str(item), axis), channelBox=False, keyable=False)
-        if rotate:
-            item.rotate.lock()
-            for axis in ('X', 'Y', 'Z'):
-                pm.setAttr('%s.rotate%s' % (str(item), axis), channelBox=False, keyable=False)
-        if scale:
-            item.scale.lock()
-            for axis in ('X', 'Y', 'Z'):
-                pm.setAttr('%s.scale%s' % (str(item), axis), channelBox=False, keyable=False)
-
-
 def arrangeListByHierarchy(itemList):
     """
     Arrange a list by hierarchy
@@ -174,6 +156,95 @@ def arrangeListByHierarchy(itemList):
     logger.debug('arrangeListByHierarchy: sorted: %s' % itemListArr)
 
     return itemListArr
+
+
+def findMirrorPoints(listObjects, mirrorVector=(-1,1,1), precision=0.01):
+    """
+    Given a list of transform nodes, organize a list with each respectivaly mirror point
+    p.e [[objLeft, objRight], [obj2Left, obj2Right], ...]
+    :param listObjects:
+    :param mirrorVector: x y z value positive or negative
+    :param precision:
+    :return:
+    """
+    # check type
+    mirrorVector = checkVectorType(mirrorVector)
+
+    # save here the results
+    mirrorObjectsList = []
+    noMirrorObjectsList = []
+    # iterate half list
+    while len(listObjects):
+        candidate = None
+        paired = []
+        # get obj positions
+        obj = listObjects.pop()
+        objPos = pm.datatypes.Vector(obj.getTranslation('world'))
+        # get search vector
+        searchVector = pm.datatypes.Vector(0,0,0)
+        for axis in range(3):
+            searchVector[axis] = objPos[axis] * mirrorVector[axis]
+
+        for mirrorObj in listObjects:
+            # compare positions
+            diferenceVector = mirrorObj.getTranslation('world') - searchVector
+            if diferenceVector.length() <= precision:
+                if not candidate:
+                    candidate = mirrorObj
+
+                # check if new candidate is nearest
+                elif candidate and diferenceVector.length() < pm.datatypes.Vector(candidate.getTranslation('world') -
+                                                                                  searchVector).length():
+                    candidate = mirrorObj
+
+        if candidate:
+            paired.append(obj)
+            paired.append(candidate)
+            # remove from list
+            listObjects.remove(candidate)
+            # and add to return list
+            mirrorObjectsList.append(paired)
+
+        # no candidate
+        else:
+            noMirrorObjectsList.append(obj)
+
+
+    return mirrorObjectsList, noMirrorObjectsList
+
+
+########################
+##Attribute Operations##
+########################
+def lockAndHideAttr(obj, translate=False, rotate=False, scale=False):
+    """
+    lock and hide transform attributes
+    # TODO: add limit operations
+    Args:
+        obj(pm.Trasform): Element to lock and hide
+        translate(True): true, lock and hide translate
+        rotate(True): true, lock and hide rotate
+        scale(True): true, lock and hide scale
+    """
+    if isinstance(obj, list):
+        itemList = obj
+    else:
+        itemList = []
+        itemList.append(obj)
+
+    for item in itemList:
+        if translate:
+            item.translate.lock()
+            for axis in ('X', 'Y', 'Z'):
+                pm.setAttr('%s.translate%s' % (str(item), axis), channelBox=False, keyable=False)
+        if rotate:
+            item.rotate.lock()
+            for axis in ('X', 'Y', 'Z'):
+                pm.setAttr('%s.rotate%s' % (str(item), axis), channelBox=False, keyable=False)
+        if scale:
+            item.scale.lock()
+            for axis in ('X', 'Y', 'Z'):
+                pm.setAttr('%s.scale%s' % (str(item), axis), channelBox=False, keyable=False)
 
 
 def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
@@ -211,6 +282,10 @@ def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
 
     return plusIkFkBlend
 
+
+######################
+##AutoRig Operations##
+######################
 
 def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ikJoints, mainJoints, twsitMainJoints, nameInfo, main, poleVector=None):
     """
@@ -390,7 +465,6 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
             for twstJnt in twsitMainJoints[i][1:]:
                 # first joint of the twistMainJoint does not has to move ()
                 multiplyDivideTwstJnt.outputX.connect(twstJnt.translateX)
-
 
 
 def conserveVolumeAnimNode(animCurve, varyTime, invFactor, Factor, nameInfo):
@@ -577,7 +651,7 @@ def twistJointsConnect(twistMainJoints, trackMain, nameInfo, pointCnstr=None):
 
 def relocatePole(pole, joints, distance=1):
     """
-    TODO: use pm math classes, and reduce codes
+    TODO: use pm math classes, and reduce code
     relocate pole position for pole vector
     at the moment, valid for 3 joints.
     not calculate rotation
@@ -667,74 +741,6 @@ def snapCurveToPoints(points, curve, iterations=4, precision=0.05):
             mfnNurbsCurve.setCV(nearest[1], nearest[0] + mvector, OpenMaya.MSpace.kWorld)
 
     mfnNurbsCurve.updateCurve()
-
-
-def orientToPlane(matrix, plane=None, respectAxis=None):
-    """
-    Conserve the general orient of a matrixTransform, but aligned to a plane.
-    option to select the respect axis
-    Args:
-        controller(pm.transform): transform matrix
-        plane(string): zx, xy, yz  lower case, first vector is the prefered vector
-    """
-    if not plane:
-        logger.info('no plane')
-        return matrix
-    elif len(plane) > 2:
-        logger.info('insert a valid plane')
-        return matrix
-
-    axisList = 'xyz'
-
-    vectors = {}
-    vIndex = 0
-    # store initial vectors
-    for axis in axisList:
-        vectors[axis] = OpenMaya.MVector(matrix[vIndex], matrix[vIndex+1], matrix[vIndex+2])
-        vIndex += 4
-
-    # compare dot products, and find the nearest vector to plane vector
-    planeVector = [0 if axis in plane else 1 for axis in axisList]  # plane vector (1,0,0) or (0,1,0) or (0,0,1)
-    planeVector = OpenMaya.MVector(planeVector[0], planeVector[1], planeVector[2])
-    dotValue = None
-    respectVector=None
-    for axis in axisList:
-        newDot = abs(planeVector * vectors[axis])
-        if dotValue < newDot:
-            dotValue = newDot
-            respectVector = axis
-
-    # find resettable axis
-    resetAxis = axisList  # convert axis list in axis string
-    for axis in plane:
-        resetAxis = resetAxis.replace(axis, '')
-
-    # reset the axis
-    resetPlane=''
-    for key, vector in vectors.iteritems():
-        if key == respectVector:  # this is not necessary to reset
-            continue
-        setattr(vector, resetAxis, 0)
-        vector.normalize()
-        resetPlane += key  # edited vectors, projected over the plane
-
-    # reconstruct matrix
-    # use comapreVectors to avoid negative scales, comparing dot product
-    compareVector = OpenMaya.MVector(vectors[respectVector])
-    vectors[respectVector] = vectors[resetPlane[0]] ^ vectors[resetPlane[1]]
-    if vectors[respectVector] * compareVector < 0:  # if dot negative, it will get as result a negative scale
-        vectors[respectVector] = vectors[resetPlane[1]] ^ vectors[resetPlane[0]]
-    vectors[respectVector].normalize()  # normalize
-    compareVector = OpenMaya.MVector(vectors[resetPlane[1]])
-    vectors[resetPlane[1]] = vectors[respectVector] ^ vectors[resetPlane[0]]
-    if compareVector * vectors[resetPlane[1]] < 0:
-        vectors[resetPlane[1]] = vectors[resetPlane[0]] ^ vectors[respectVector]
-    vectors[resetPlane[1]].normalize()  # normalize
-
-    returnMatrix = [vectors[axisList[0]].x, vectors[axisList[0]].y, vectors[axisList[0]].z, matrix[3], vectors[axisList[1]].x, vectors[axisList[1]].y, vectors[axisList[1]].z, matrix[7],
-                vectors[axisList[2]].x, vectors[axisList[2]].y, vectors[axisList[2]].z, matrix[11], matrix[12], matrix[13], matrix[14], matrix[15]]
-
-    return returnMatrix
 
 
 def stretchCurveVolume(curve, joints, baseName, main=None):
@@ -911,6 +917,10 @@ def twistJointConnect(mainJointList, twistList, joints, twistSyncJoints):
                 pm.orientConstraint(twistJnt, skinJoint, maintainOffset=False)
                 pm.pointConstraint(twistJnt, skinJoint, maintainOffset=False)
 
+
+#######################
+##Deformer operations##
+#######################
 
 def getSkinedMeshFromJoint(joint):
     """
@@ -1280,97 +1290,6 @@ def latticeBendDeformer(lattice, controller=None):
     return [scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot]
 
 
-def dotBasedPS(driverVector, drivenVector):
-    """
-    Create a conection based on a space deform to drive attributes
-    :param driverVector(str or pm): VectorProduct node with driver vector info
-    :param drivenVector(str or pm): Transform node that will be used as a reference to calculate the dot product
-    :param attributes(str): attributes that will be drived
-    :return psDot: vector product node with dot product
-    """
-    # get ps dot
-    psDot = pm.createNode('vectorProduct')
-    psDot.operation.set(1)
-    driverVector.output.connect(psDot.input2)  # connect driver vector
-    drivenVector.output.connect(psDot.input1)  # connect driven vector
-
-    return psDot
-
-
-def getVectorBetweenTransforms(point1, point2, normalized=True):
-    """
-    Get the vector defined by two transform nodes. independent of the hierarchy
-    the base of this method is set a vectorProduct node as dotMatrixProduct. and
-    operate over a vector (0,0,0), this way we get the world space translation.
-    :param point1: origin of the vector
-    :param point2: end of the vector
-    :param normalized: normalized or not
-    :return:
-    """
-    # check data types
-    if isinstance(point1, str):
-        point1 = pm.PyNode(point1)
-    if isinstance(point2, str):
-        point2 = pm.PyNode(point2)
-
-    # get point1 transform from transform node
-    vector1Product = pm.createNode('vectorProduct')
-    vector1Product.normalizeOutput.set(False)
-    point1.worldMatrix[0].connect(vector1Product.matrix)
-    # set vProduct node
-    vector1Product.operation.set(4)
-    for axis in 'XYZ':
-        vector1Product.attr('input1%s' % axis).set(0)
-
-    #get point2 Transform Node
-    vector2Product = pm.createNode('vectorProduct')
-    vector2Product.normalizeOutput.set(False)
-    point2.worldMatrix[0].connect(vector2Product.matrix)
-    # set v2Product node
-    vector2Product.operation.set(4)
-    for axis in 'XYZ':
-        vector2Product.attr('input1%s' % axis).set(0)
-
-    # substract vector1 from vector2
-    plusMinus=pm.createNode('plusMinusAverage')
-    plusMinus.operation.set(2) # substract
-    vector1Product.output.connect(plusMinus.input3D[1])  # vector2 - vector1
-    vector2Product.output.connect(plusMinus.input3D[0])
-
-    # finally connect to to another vector product and normalize if arg normalize is true
-    vectorBetween = pm.createNode('vectorProduct')
-    vectorBetween.operation.set(0)  # no operation
-    vectorBetween.normalizeOutput.set(normalized)
-    plusMinus.output3D.connect(vectorBetween.input1)
-
-    return vectorBetween, vector1Product, vector2Product
-
-
-def getVectorFromMatrix(transform, vector):
-    """
-    Get the desired vector from a transform node
-    :param transform:
-    :param vector:
-    :return: vectorProduct Node
-    """
-    # check args types and create pm nodes
-    if isinstance(transform, str):
-        transform = pm.PyNode(transform)
-
-    # get Transform vector
-    driverVecProduct = pm.createNode('vectorProduct')
-    driverVecProduct.normalizeOutput.set(True)
-    transform.worldMatrix[0].connect(driverVecProduct.matrix)
-    # set Vector product to vector matrix product
-    # and get x vector
-    driverVecProduct.operation.set(3)  # 3 is matrix vector product
-    for i, attr in enumerate('XYZ'):
-        driverVecProduct.attr('input1%s' % attr).set(vector[i])
-    driverVecProduct.normalizeOutput.set(True)
-
-    return driverVecProduct
-
-
 def jointChain(length=None, joints=10, curve=None):
     """
     create a joint chain
@@ -1472,6 +1391,10 @@ def jointChain(length=None, joints=10, curve=None):
 
     return jointsList
 
+
+####################################
+##Nurbs surface or curve Operation##
+####################################
 
 def curveToSurface(curve, width=5.0, steps=10):
     """
@@ -1577,17 +1500,283 @@ def squareController(heigh, width, normalAxis= 'x', color=None):
     return sqrController
 
 
-def getCurrentPath():
+#####################
+##Vector Operations##
+#####################
+def checkVectorType(vector):
     """
-    Get the ARCore.py path
-    :return: ARCore.py path
+    Check vector type, tuple, list or pm
+    :param vector:
+    :return:
     """
-    #print __name__
-    #print inspect.currentframe()
-    #print inspect.getfile(inspect.currentframe())
-    #print os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-    #print os.path.abspath(inspect.getfile(inspect.currentframe()))
-    return os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+    # check type
+    # vector
+    if isinstance(vector, list) or isinstance(vector, tuple):
+        vector = pm.datatypes.Vector(vector[0], vector[1], vector[2])
+
+    return vector
+
+
+def checkMatrixType(matrix):
+    """
+    check matrix type, tuple, list or pm
+    :param matrix:
+    :return:
+    """
+    # matrix
+    if isinstance(matrix, list) or isinstance(matrix, tuple):
+        if len(matrix) == 16:
+            matrix = pm.datatypes.Matrix([matrix[0], matrix[1], matrix[2], matrix[3]],
+                                         [matrix[4], matrix[5], matrix[6], matrix[7]],
+                                         [matrix[8], matrix[9], matrix[10], matrix[11]],
+                                         [matrix[12], matrix[13], matrix[14], matrix[15]])
+        if len(matrix) == 4:
+            matrix = pm.datatypes.Matrix([matrix[0][0], matrix[0][1], matrix[0][2], matrix[0][3]],
+                                         [matrix[1][0], matrix[1][1], matrix[1][2], matrix[1][3]],
+                                         [matrix[2][0], matrix[2][1], matrix[2][2], matrix[2][3]],
+                                         [matrix[3][0], matrix[3][1], matrix[3][2], matrix[3][3]])
+
+    return matrix
+
+
+def orientToPlane(matrix, plane=None, respectAxis=None):
+    """
+    Conserve the general orient of a matrixTransform, but aligned to a plane.
+    option to select the respect axis
+    Args:
+        controller(pm.transform): transform matrix
+        plane(string): zx, xy, yz  lower case, first vector is the prefered vector
+    """
+    if not plane:
+        logger.info('no plane')
+        return matrix
+    elif len(plane) > 2:
+        logger.info('insert a valid plane')
+        return matrix
+
+    axisList = 'xyz'
+
+    vectors = {}
+    vIndex = 0
+    # store initial vectors
+    for axis in axisList:
+        vectors[axis] = OpenMaya.MVector(matrix[vIndex], matrix[vIndex+1], matrix[vIndex+2])
+        vIndex += 4
+
+    # compare dot products, and find the nearest vector to plane vector
+    planeVector = [0 if axis in plane else 1 for axis in axisList]  # plane vector (1,0,0) or (0,1,0) or (0,0,1)
+    planeVector = OpenMaya.MVector(planeVector[0], planeVector[1], planeVector[2])
+    dotValue = None
+    respectVector=None
+    for axis in axisList:
+        newDot = abs(planeVector * vectors[axis])
+        if dotValue < newDot:
+            dotValue = newDot
+            respectVector = axis
+
+    # find resettable axis
+    resetAxis = axisList  # convert axis list in axis string
+    for axis in plane:
+        resetAxis = resetAxis.replace(axis, '')
+
+    # reset the axis
+    resetPlane=''
+    for key, vector in vectors.iteritems():
+        if key == respectVector:  # this is not necessary to reset
+            continue
+        setattr(vector, resetAxis, 0)
+        vector.normalize()
+        resetPlane += key  # edited vectors, projected over the plane
+
+    # reconstruct matrix
+    # use comapreVectors to avoid negative scales, comparing dot product
+    compareVector = OpenMaya.MVector(vectors[respectVector])
+    vectors[respectVector] = vectors[resetPlane[0]] ^ vectors[resetPlane[1]]
+    if vectors[respectVector] * compareVector < 0:  # if dot negative, it will get as result a negative scale
+        vectors[respectVector] = vectors[resetPlane[1]] ^ vectors[resetPlane[0]]
+    vectors[respectVector].normalize()  # normalize
+    compareVector = OpenMaya.MVector(vectors[resetPlane[1]])
+    vectors[resetPlane[1]] = vectors[respectVector] ^ vectors[resetPlane[0]]
+    if compareVector * vectors[resetPlane[1]] < 0:
+        vectors[resetPlane[1]] = vectors[resetPlane[0]] ^ vectors[respectVector]
+    vectors[resetPlane[1]].normalize()  # normalize
+
+    returnMatrix = [vectors[axisList[0]].x, vectors[axisList[0]].y, vectors[axisList[0]].z, matrix[3], vectors[axisList[1]].x, vectors[axisList[1]].y, vectors[axisList[1]].z, matrix[7],
+                vectors[axisList[2]].x, vectors[axisList[2]].y, vectors[axisList[2]].z, matrix[11], matrix[12], matrix[13], matrix[14], matrix[15]]
+
+    return returnMatrix
+
+
+def dotBasedPS(driverVector, drivenVector):
+    """
+    Create a conection based on a space deform to drive attributes
+    :param driverVector(str or pm): VectorProduct node with driver vector info
+    :param drivenVector(str or pm): Transform node that will be used as a reference to calculate the dot product
+    :param attributes(str): attributes that will be drived
+    :return psDot: vector product node with dot product
+    """
+    # get ps dot
+    psDot = pm.createNode('vectorProduct')
+    psDot.operation.set(1)
+    driverVector.output.connect(psDot.input2)  # connect driver vector
+    drivenVector.output.connect(psDot.input1)  # connect driven vector
+
+    return psDot
+
+
+def getVectorBetweenTransforms(point1, point2, normalized=True):
+    """
+    Get the vector defined by two transform nodes. independent of the hierarchy
+    the base of this method is set a vectorProduct node as dotMatrixProduct. and
+    operate over a vector (0,0,0), this way we get the world space translation.
+    :param point1: origin of the vector
+    :param point2: end of the vector
+    :param normalized: normalized or not
+    :return:
+    """
+    # check data types
+    if isinstance(point1, str):
+        point1 = pm.PyNode(point1)
+    if isinstance(point2, str):
+        point2 = pm.PyNode(point2)
+
+    # get point1 transform from transform node
+    vector1Product = pm.createNode('vectorProduct')
+    vector1Product.normalizeOutput.set(False)
+    point1.worldMatrix[0].connect(vector1Product.matrix)
+    # set vProduct node
+    vector1Product.operation.set(4)
+    for axis in 'XYZ':
+        vector1Product.attr('input1%s' % axis).set(0)
+
+    #get point2 Transform Node
+    vector2Product = pm.createNode('vectorProduct')
+    vector2Product.normalizeOutput.set(False)
+    point2.worldMatrix[0].connect(vector2Product.matrix)
+    # set v2Product node
+    vector2Product.operation.set(4)
+    for axis in 'XYZ':
+        vector2Product.attr('input1%s' % axis).set(0)
+
+    # substract vector1 from vector2
+    plusMinus=pm.createNode('plusMinusAverage')
+    plusMinus.operation.set(2) # substract
+    vector1Product.output.connect(plusMinus.input3D[1])  # vector2 - vector1
+    vector2Product.output.connect(plusMinus.input3D[0])
+
+    # finally connect to to another vector product and normalize if arg normalize is true
+    vectorBetween = pm.createNode('vectorProduct')
+    vectorBetween.operation.set(0)  # no operation
+    vectorBetween.normalizeOutput.set(normalized)
+    plusMinus.output3D.connect(vectorBetween.input1)
+
+    return vectorBetween, vector1Product, vector2Product
+
+
+def getVectorFromMatrix(transform, vector):
+    """
+    Get the desired vector from a transform node.
+    Using node operations
+    :param transform:
+    :param vector:
+    :return: vectorProduct Node
+    """
+    # check args types and create pm nodes
+    if isinstance(transform, str):
+        transform = pm.PyNode(transform)
+
+    # get Transform vector
+    driverVecProduct = pm.createNode('vectorProduct')
+    driverVecProduct.normalizeOutput.set(True)
+    transform.worldMatrix[0].connect(driverVecProduct.matrix)
+    # set Vector product to vector matrix product
+    # and get x vector
+    driverVecProduct.operation.set(3)  # 3 is matrix vector product
+    for i, attr in enumerate('XYZ'):
+        driverVecProduct.attr('input1%s' % attr).set(vector[i])
+    driverVecProduct.normalizeOutput.set(True)
+
+    return driverVecProduct
+
+
+class VectorOperations(object):
+    """
+    class based on common vector operations.
+    This class exists for organize porpoises.
+    """
+    @staticmethod
+    def reflectedMatrix(matrix, refMatrix=pm.datatypes.Matrix([-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1])):
+        """
+        Return a reflected matrix, with no negative scales
+        :param matrix:
+        :param refMatrix:
+        :return:
+        """
+        # check types
+        matrix = checkMatrixType(matrix)
+        refMatrix = checkMatrixType(refMatrix)
+
+        matrixDet = matrix.det()
+        # new matrix, remember the order is important
+        returnMatrix = matrix * refMatrix
+
+        # compare determinants, this way avoid undesired flipped axis
+        for i in range(3):
+            if matrixDet != returnMatrix.det():
+                returnMatrix[i] *= -1
+            else:
+                break
+
+        return returnMatrix
+
+
+
+    @ staticmethod
+    def reflectedVectorByMatrix(vector, matrix=pm.datatypes.Matrix([-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1])):
+        """
+        Return a Vector reflected by a reflection matrix
+        default mirro x axis
+        :param vector:
+        :param matrix:
+        :return:
+        """
+        # check data type
+        # vector
+        vector = checkVectorType(vector)
+        matrix = checkMatrixType(matrix)
+
+        return matrix * vector
+
+
+    @staticmethod
+    def reflectedVector(vector, normal):
+        """
+        Return the vector reflected over another vector (normal)
+        :param vector:
+        :param normal:
+        :return:
+        """
+        # check data type
+
+    @staticmethod
+    def projectVector(vector, normal):
+        """
+        Return the vector projected over another vector (normal)
+        :param vector:
+        :param normal:
+        :return:
+        """
+        # check types, change to pm vectors
+        # vector
+        vector = checkVectorType(vector)
+        # normal
+        normal = checkVectorType(normal)
+
+        projection = (vector*normal/(normal.length() ** 2.0)) * normal
+        return projection
+
+
+
 
 
 #############
@@ -1606,7 +1795,6 @@ class System(object):
         self.systemGrp = '%s_grp' % self.baseName  # parent of the system
         self.noXformGrp = '%s_noXform_grp' % self.baseName  # parent of noxform objects
         self.controllerGrp = '%s_controllers_grp' % self.baseName  # parent of controllers
-
 
     def buildSystem(self):
         """
@@ -2069,4 +2257,3 @@ class WireCurve(System):
 
             # connect to point
             posVector.output3D.connect(point.translate)
-
