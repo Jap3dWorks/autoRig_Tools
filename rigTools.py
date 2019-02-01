@@ -784,3 +784,123 @@ class PickerTools(object):
             controllers[transform] = meshInfo
 
         return controllers
+
+#########################
+##Shape Modelling Tools##
+#########################
+class MirrorControllers(object):
+    """
+    Tools for shapes modeling
+    """
+    def __init__(self, axis=(-1,1,1)):
+        """
+        need a zero position frame
+        """
+        self.axis = axis
+        selection = pm.ls(sl=True)
+        # find symetry controllers from selection
+        self.symetryControls, self.noSymetryControls = ARCore.findMirrorPoints(selection, axis)
+
+        logger.info('Mirror Controllers store')
+
+
+    def mirror(self, worldSpace=False, symetrize= False):
+        """
+        mirror the controllers position and orientation
+        :return:
+        """
+        flippedAxis = 'xyz'
+        flippedVector = None
+        # create reflection Matrix
+        reflMatrix = pm.datatypes.Matrix()
+        for i in range(len(self.axis)):
+            reflMatrix[i] *= self.axis[i]
+            # only flip 1 axis
+            if self.axis[i] < 0:
+                # get flipped axis
+                flippedVector = i
+                flippedAxis = flippedAxis[i]
+                break
+        else:
+            logger.info('No flipped axis, please add a flipped axis p.e(-1,1,1)')
+            return
+
+        if not symetrize:
+            # inver positions
+            for pairCtr in self.symetryControls:
+                matrix1 = pm.xform(pairCtr[0], ws=worldSpace, q=True, m=True)
+                matrix1 = ARCore.checkMatrixType(matrix1)
+                invMatrix1 = ARCore.VectorOperations.reflectedMatrix(matrix1, reflMatrix)
+
+                matrix2 = pm.xform(pairCtr[1], ws=worldSpace, q=True, m=True)
+                matrix2 = ARCore.checkMatrixType(matrix2)
+                invMatrix2 = ARCore.VectorOperations.reflectedMatrix(matrix2, reflMatrix)
+
+                # apply matrix
+                pm.xform(pairCtr[0], ws=worldSpace, m=invMatrix2)
+                pm.xform(pairCtr[1], ws=worldSpace, m=invMatrix1)
+
+            for ctr in self.noSymetryControls:
+                matrix = pm.xform(ctr, ws=worldSpace, q=True, m=True)
+                invMatrix = ARCore.VectorOperations.reflectedMatrix(matrix, reflMatrix)
+                # apply
+                pm.xform(ctr, ws=worldSpace, m=invMatrix)
+
+            logger.info('Mirror done')
+
+        # symmetrize
+        else:
+            for pairCtr in self.symetryControls:
+                positiveIndex = 0 if getattr(pairCtr[0].getTranslation('world'), '%s' % flippedAxis) > 0 else 1
+                negativeIndex = 1 - positiveIndex
+
+                matrixPositive = pm.xform(pairCtr[positiveIndex], ws=worldSpace, q=True, m=True)
+                flipMatrix = ARCore.VectorOperations.reflectedMatrix(matrixPositive, reflMatrix)
+
+                # apply matrix
+                pm.xform(pairCtr[negativeIndex], ws=worldSpace, m=flipMatrix)
+
+            logger.info('Symmetry done')
+
+def dupGeoEachFrame(mesh, animatedAttr):
+    """
+    Clone the given mesh each animatedAttr frame
+    :param mesh:
+    :param animatedObj:
+    :return:
+    """
+    # data types
+    if isinstance(mesh, str):
+        mesh = pm.PyNode(mesh)
+    if not isinstance(mesh, pm.nodetypes.Transform):
+        mesh = mesh.getTransform()
+
+    # animated obj
+    if isinstance(animatedAttr, str):
+        animatedAttr = pm.PyNode(animatedAttr)
+    if not isinstance(animatedAttr, pm.general.Attribute):
+        logger.info('animatedAttr must be an attribute')
+        return
+
+    animNode = animatedAttr.inputs(type='animCurve')[0]
+    if not animNode:
+        logger.info('%s has not animation' % animatedAttr)
+        return
+
+    KeyFrames = [animNode.getTime(i) for i in range(animNode.numKeys())]
+
+    dupGrp = pm.group(empty=True, name=str(mesh)+'_dups')
+    dupMeshes =[]
+    for frame in KeyFrames:
+        # set Time at frame
+        pm.currentTime(frame, edit=True)
+        # clone the mesh
+        dupMeshes.append(mesh.duplicate(name=str(mesh)+'f%s' % frame)[0])
+        dupGrp.addChild(dupMeshes[-1])
+
+    return dupMeshes
+
+
+
+
+
