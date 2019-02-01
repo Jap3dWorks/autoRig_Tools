@@ -1365,7 +1365,6 @@ class RigAuto(object):
         This method should be called as a *arg for ikFkChain_auto.
         :return:
         """
-        # TODO, detect parent from las ikFk chain
         fkColor = 14 if self.lastSide == 'left' else 29
         clavicleJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*(?!End)(?!0)(?!twist).*skin_joint$' % (self.chName, zone, self.lastSide), str(point))]
         clUpperArmJoint = clavicleJoints[-1].getChildren()[0]
@@ -1498,8 +1497,8 @@ class RigAuto(object):
         # Find base curve
         baseCurve = wire.baseWire[0].inputs()[0]
         # get controls
-        curveTransforms = ARCore.transformDriveCurveCV(curve)
-        baseCurveTransforms = ARCore.transformDriveCurveCV(baseCurve)
+        curveTransforms = ARCore.transformDriveNurbObjectCV(curve)
+        baseCurveTransforms = ARCore.transformDriveNurbObjectCV(baseCurve)
 
         # vinculate to rig
         for i, trn in enumerate(curveTransforms):
@@ -1682,7 +1681,7 @@ class RigAuto(object):
 
             rangeNodesList = []
             for i, driven in enumerate(drivenObj):
-                drivenVector = ARCore.getVectorBetweenTransforms(driver, driven)
+                drivenVector = ARCore.getVectorBetweenTransforms(driver, driven)[0]
                 dotPS = ARCore.dotBasedPS(driverVector, drivenVector)
                 # offset
                 offsetNode = pm.createNode('addDoubleLinear')
