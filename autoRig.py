@@ -890,7 +890,7 @@ class RigAuto(object):
             # get transformMatrix and orient new controller
             matrix = pm.xform(footFkCtr, ws=True, q=True, m=True)
 
-            matrix = ARCore.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
+            matrix = ARCore.VectorOperations.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
             pm.xform(footFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             # fk control Shape
@@ -1017,10 +1017,11 @@ class RigAuto(object):
         # once all foot controllers are created, translate if necessary
         pm.xform(footIkCtr, ws=True, m=firstfootFkMatrix)
         # relocateBall cotr, aligned with middle toe
-        footBallIkMatrix = [firstfootFkMatrix[0],firstfootFkMatrix[1],firstfootFkMatrix[2],firstfootFkMatrix[3],
-                                            firstfootFkMatrix[4],firstfootFkMatrix[5],firstfootFkMatrix[6],firstfootFkMatrix[7],
-                                            firstfootFkMatrix[8],firstfootFkMatrix[9],firstfootFkMatrix[10],firstfootFkMatrix[11],
-                                            middleToeCtrMatrix[12], middleToeCtrMatrix[13], middleToeCtrMatrix[14], middleToeCtrMatrix[15]]
+        footBallIkMatrix = pm.datatypes.Matrix([firstfootFkMatrix[0],
+                                                firstfootFkMatrix[1],
+                                                firstfootFkMatrix[2],
+                                                [middleToeCtrMatrix[12], middleToeCtrMatrix[13], middleToeCtrMatrix[14], middleToeCtrMatrix[15]]])
+
         pm.xform(footBallIkCtr, ws=True, m=footBallIkMatrix)
 
         # parent toes Ik ctr to footToes
@@ -1227,7 +1228,7 @@ class RigAuto(object):
             # get transformMatrix and orient new controller TODO: function
             matrix = pm.xform(handFkCtr, ws=True, q=True, m=True)
 
-            matrix = ARCore.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
+            matrix = ARCore.VectorOperations.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
             pm.xform(handFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             if not handFkControllerList:
@@ -1581,8 +1582,9 @@ class RigAuto(object):
 
         return [], []
 
-    def PSSkirt_auto(self, zone, side, drivers, parent, offset=0.15, falloff=1, range=75):
+    def PSSkirt_auto(self, zone, drivers, parent, offset=0.15, falloff=1, range=75):
         """
+        PoseSpace skirt
         TODO: less vector points, and more global
         :param zone:
         :param side:
@@ -1593,14 +1595,14 @@ class RigAuto(object):
         :param range:
         :return:
         """
-        skirtJoints = [point for point in pm.ls() if re.match('^%s.*(%s).*%s.*joint$' % (self.chName, zone, side), str(point))]
+        skirtJoints = [point for point in pm.ls() if re.match('^%s.*(%s).*joint$' % (self.chName, zone), str(point))]
+        # arrange lists by hierarchy
+        skirtJointsArrange = ARCore.arrangeListByHierarchy(skirtJoints)
 
         # get drivers positions
         driversPos = []
         for driver in drivers:
             driversPos.append(pm.xform(driver, ws=True, q=True, t=True))
-        # arrange lists by hierarchy
-        skirtJointsArrange = ARCore.arrangeListByHierarchy(skirtJoints)
 
         # create controllers
         fkControllerList = []  # fk controllers
@@ -1622,7 +1624,6 @@ class RigAuto(object):
                 # create point ctr
                 pointCtr = self.create_controller(str(controller).replace('ctr', 'ctr').replace('fk', 'point'), 'pole', .5, 7)
                 pm.xform(pointCtr, ws=True, m=pm.xform(controller, ws=True, q=True, m=True))
-                # make shapes visibles review
 
                 # parent to controller
                 controller.addChild(pointCtr)
@@ -1635,54 +1636,76 @@ class RigAuto(object):
 
         # create roots
         rootsControllerList = []
-        for fkCtrChain in  fkControllerList:
+        for fkCtrChain in fkControllerList:
             ARCore.createRoots(fkCtrChain)
             rootsControllers = ARCore.createRoots(fkCtrChain, 'auto')
             rootsControllerList.append(rootsControllers)
 
-        # create driven Vectors
-        drivenObj=[]
-        for joints in skirtJointsArrange:
-            drivVec = pm.group(empty=True)
-            pm.xform(drivVec, ws=True, m=pm.xform(joints[0], q=True, ws=True, m=True))
-            drivVecPos = drivVec.getTranslation('world')
-            drivVec.setTranslation([drivVecPos[0], driversPos[0][1], drivVecPos[2]], 'world')
-            # point constraint, Review performance point vs matrix dot product
-            parent.addChild(drivVec)
-            drivenObj.append(drivVec)
+        dotVectors=[]
+        driverVectors = []  # node with aligned x vector of the driver
+        # create driver matrix
+        for driver in drivers:
+            driverVectorName = '%s_driverVector' % (str(driver))
+            # if not, create
+            # and use the object space translation as vector, normalized
+            # to get the driver vector, we query childs position.
+            driverPM = pm.PyNode(driver)  # create pm node
+            driverVectorGrp = pm.group(empty=True, name='%s_vectorGrp' % str(driverPM))
+            # get the matrix of the driver
+            driverMatrix = pm.xform(driverPM, q=True, m=True, ws=True)
+            pm.xform(driverVectorGrp, ws=True, m=driverMatrix)
+            # use a copy of the vector matrix to calculate de dots.
+            dotMatrix = driverVectorGrp.duplicate()[0]  # we extract the dot vectors from this matrix
+
+            # orient constraint
+            pm.orientConstraint(driverPM, driverVectorGrp, maintainOffset=False)
+            # get vector
+            childDriver = driverPM.childAtIndex(0).getTranslation('object')
+            childDriver = pm.datatypes.Vector(childDriver)
+            # get vector from matrix, x vector in this case, cause childDriver has only x translate
+            driverVector = ARCore.VectorOperation_Nodes.getVectorFromMatrix(driverVectorGrp.worldMatrix[0], childDriver).node()
+
+            # node with driverVector
+            driverVector.rename(driverVectorName)
+            driverVectors.append(driverVector)
+
+            # parent
+            parent.addChild(driverVectorGrp)
+
+            # create dot Vectors, fixed vectors that will be part of the dot calculus
+            # we are gonna create 4 vectors for controller, one for each axis in the local plane yz.
+            # get desired plane
+            plane = 'xyz'
+            for axis in plane:
+                if getattr(childDriver, axis) != 0:
+                    plane = plane.replace(axis, '')
+                    break
+
+            # create dot vectors transforms
+            for i, axis in enumerate('xyz'):
+                if axis in plane:
+                    for sign in [2,-2]:
+                        axisName = axis if sign > 0 else 'n%s' % axis
+                        dotVector = pm.group(empty=True, name='%s_%s_dotVector' % (str(driver), axisName))
+                        # get vector position
+                        planeAxisVector = driverMatrix[i]
+                        print type(planeAxisVector)
+                        print planeAxisVector + driverMatrix[3]
+                        dotVector.setTranslation(((planeAxisVector*sign) + driverMatrix[3])[:3], 'world')
+                        parent.addChild(dotVector)
+                        dotVectors.append(dotVector)
+
+            # create dot space
+
+
 
         # create dot space
         driversRangeList=[]  # outputs of the dot system
         for driver in drivers:
-            driverVectorName = '%s_driverVector' % (str(driver))
-            try:
-                # find a previous driver node created for the driver
-                driverVector = pm.PyNode(driverVectorName)
-            except:
-                # if not, create
-                # and use the object space translation as vector, normalized
-                # to get the driver vector, we query childs position
-                driverPM = pm.PyNode(driver)  # create pm node
-                driverVectorGrp = pm.group(empty=True, name='%s_vectorGrp' % str(driverPM))
-                driverMatrix = pm.xform(driverPM, q=True, m=True, ws=True)
-                driverMatrix = ARCore.orientToPlane(driverMatrix, 'zx')
-                pm.xform(driverVectorGrp, ws=True, m=driverMatrix)
-
-                # orient constraint
-                pm.orientConstraint(driverPM, driverVectorGrp, maintainOffset=True)
-                # get vector
-                childDriver = driverPM.childAtIndex(0).getTranslation('object')
-                childDriver = pm.datatypes.Vector(childDriver)
-                driverVector = ARCore.getVectorFromMatrix(driverVectorGrp, childDriver)
-                driverVector.rename(driverVectorName)
-
-                # parent
-                parent.addChild(driverVectorGrp)
-
             rangeNodesList = []
-            for i, driven in enumerate(drivenObj):
-                drivenVector = ARCore.getVectorBetweenTransforms(driver, driven)[0]
-                dotPS = ARCore.dotBasedPS(driverVector, drivenVector)
+            for i, driven in enumerate(dotVectors):
+                drivenVector = ARCore.VectorOperation_Nodes.getVectorBetweenTransforms(driver, driven)[0]
+                dotPS = ARCore.VectorOperation_Nodes.dotProduct(drivenVector.output, driverVector.output)
                 # offset
                 offsetNode = pm.createNode('addDoubleLinear')
                 offsetNode.input2.set(offset)  # offset value

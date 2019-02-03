@@ -230,6 +230,7 @@ def snapIkFk(controller):
 
 def neckHeadIsolateSnap(name, zone, controller, point, orient):
     """
+    TODO: valid with only 1 argument
     isolate to 0 or 1 and snap controllers
     args:
         name(str): character name
