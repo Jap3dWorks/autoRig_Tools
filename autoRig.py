@@ -1586,6 +1586,7 @@ class RigAuto(object):
         """
         PoseSpace skirt
         TODO: less vector points, and more global
+        TODO: rename correctly
         :param zone:
         :param side:
         :param drivers:
@@ -1595,6 +1596,10 @@ class RigAuto(object):
         :param range:
         :return:
         """
+        # simplify names from modules
+        VM_N = ARCore.VectorMath_Nodes
+        DGU = ARCore.DependencyGraphUtils
+
         skirtJoints = [point for point in pm.ls() if re.match('^%s.*(%s).*joint$' % (self.chName, zone), str(point))]
         # arrange lists by hierarchy
         skirtJointsArrange = ARCore.arrangeListByHierarchy(skirtJoints)
@@ -1635,151 +1640,234 @@ class RigAuto(object):
             pointControllers.append(pointChainController)
 
         # create roots
-        rootsControllerList = []
+        firstChainRoot = []
         for fkCtrChain in fkControllerList:
-            ARCore.createRoots(fkCtrChain)
-            rootsControllers = ARCore.createRoots(fkCtrChain, 'auto')
-            rootsControllerList.append(rootsControllers)
+            root = ARCore.createRoots(fkCtrChain)
+            firstChainRoot.append(root[0])
 
-        dotVectors=[]
-        driverVectors = []  # node with aligned x vector of the driver
+        driverVectors_list = []  # node with aligned x vector of the driver
+        autoGrpTotal_list = []
+        lastNoTwistRef_grp=None
         # create driver matrix
-        for driver in drivers:
-            driverVectorName = '%s_driverVector' % (str(driver))
-            # if not, create
+        for drvId, driver in enumerate(drivers):
+            DVName = '%s_system' % (str(driver))
             # and use the object space translation as vector, normalized
-            # to get the driver vector, we query childs position.
-            driverPM = pm.PyNode(driver)  # create pm node
-            driverVectorGrp = pm.group(empty=True, name='%s_vectorGrp' % str(driverPM))
-            # get the matrix of the driver
-            driverMatrix = pm.xform(driverPM, q=True, m=True, ws=True)
-            pm.xform(driverVectorGrp, ws=True, m=driverMatrix)
-            # use a copy of the vector matrix to calculate de dots.
-            dotMatrix = driverVectorGrp.duplicate()[0]  # we extract the dot vectors from this matrix
+            driver = pm.PyNode(driver)  # create pm node
 
-            # orient constraint
-            pm.orientConstraint(driverPM, driverVectorGrp, maintainOffset=False)
+            # we do not use the driver itself to preserve modularity
+            driverVectorGrp = pm.group(empty=True, name='%s_vectorGrp' % str(driver))  # <-this node x axis should control the system
+            # get the matrix of the driver
+            driverMatrix = pm.xform(driver, q=True, m=True, ws=True)
+            pm.xform(driverVectorGrp, ws=True, m=driverMatrix)  # align with the driver object
+            parent.addChild(driverVectorGrp)  # parent
+
+            # use a copy of the vector matrix to calculate de dots.
+            noTwistRef_grp = driverVectorGrp.duplicate()[0]  # <- we extract the dot vectors from this matrix
+            noTwistRef_grp.rename('%s_refGrp' % str(driver))
+            # orient constraint, and it should follow the driver object
+            pm.orientConstraint(driver, driverVectorGrp, maintainOffset=False)
+
             # get vector
-            childDriver = driverPM.childAtIndex(0).getTranslation('object')
-            childDriver = pm.datatypes.Vector(childDriver)
+            # to get the driver vector, we query child position.
+            childDriver = pm.datatypes.Vector(driver.childAtIndex(0).getTranslation('object'))
+            invertDot = 1
+            for axis in 'xyz':
+                if int(getattr(childDriver, axis)):
+                    # save this value, will be useful later to invert dot vector mask
+                    invertDot = getattr(childDriver, axis) / abs(getattr(childDriver, axis))
+                # abssolute value, needed to extract correctly the vector from the matrix
+                setattr(childDriver, axis, abs(int(getattr(childDriver, axis))))
+
             # get vector from matrix, x vector in this case, cause childDriver has only x translate
-            driverVector = ARCore.VectorOperation_Nodes.getVectorFromMatrix(driverVectorGrp.worldMatrix[0], childDriver).node()
+            driverVector = VM_N.getVectorFromMatrix(driverVectorGrp.worldMatrix[0], childDriver)  # <- X Axis
+            logger.debug('Skirt driver Vector X: %s' % str(driverVector.get()))
 
             # node with driverVector
-            driverVector.rename(driverVectorName)
-            driverVectors.append(driverVector)
+            driverVector.node().rename('%s_driver' % DVName)
+            driverVectors_list.append(driverVector.node())
 
-            # parent
-            parent.addChild(driverVectorGrp)
-
-            # create dot Vectors, fixed vectors that will be part of the dot calculus
-            # we are gonna create 4 vectors for controller, one for each axis in the local plane yz.
-            # get desired plane
-            plane = 'xyz'
-            for axis in plane:
-                if getattr(childDriver, axis) != 0:
-                    plane = plane.replace(axis, '')
-                    break
-
-            # create dot vectors transforms
+            planeVecs = []
             for i, axis in enumerate('xyz'):
-                if axis in plane:
-                    for sign in [2,-2]:
-                        axisName = axis if sign > 0 else 'n%s' % axis
-                        dotVector = pm.group(empty=True, name='%s_%s_dotVector' % (str(driver), axisName))
-                        # get vector position
-                        planeAxisVector = driverMatrix[i]
-                        print type(planeAxisVector)
-                        print planeAxisVector + driverMatrix[3]
-                        dotVector.setTranslation(((planeAxisVector*sign) + driverMatrix[3])[:3], 'world')
-                        parent.addChild(dotVector)
-                        dotVectors.append(dotVector)
+                # get the two vectors in object space that define the plane
+                # use int, because sometimes maya adds very low decimals, this is a way to avoid them
+                if int(getattr(childDriver, axis)) == 0:  # equal to zero. is one of the pair of vectors that define a plane
+                    vector = pm.datatypes.Vector()
+                    setattr(vector, axis, 1)
+                    logger.debug('PSSkirt vector: %s %s' % (axis, vector))
+                    planeVecs.append(vector)
 
-            # create dot space
+            logger.debug('PSSkirt plane vectors: %s' % planeVecs)
 
+            ## no twist transform track##
+            # create a transform node that will follow the driven but its twist
+            # we reconstruct transform matrix for that porpoise
 
+            # first axis info
+            refVectorY = VM_N.getVectorFromMatrix(noTwistRef_grp.worldMatrix[0], planeVecs[0])
+            vectorY_Proj = VM_N.projectVectorOntoPlane(refVectorY, driverVector, True)
 
-        # create dot space
-        driversRangeList=[]  # outputs of the dot system
-        for driver in drivers:
-            rangeNodesList = []
-            for i, driven in enumerate(dotVectors):
-                drivenVector = ARCore.VectorOperation_Nodes.getVectorBetweenTransforms(driver, driven)[0]
-                dotPS = ARCore.VectorOperation_Nodes.dotProduct(drivenVector.output, driverVector.output)
-                # offset
-                offsetNode = pm.createNode('addDoubleLinear')
-                offsetNode.input2.set(offset)  # offset value
-                dotPS.outputX.connect(offsetNode.input1)
-                # create condition
-                condition = pm.createNode('condition')
-                condition.operation.set(2)  # greater than
-                condition.secondTerm.set(0)
-                offsetNode.output.connect(condition.colorIfTrueR)
-                offsetNode.output.connect(condition.firstTerm)
-                for axis in ('R', 'G', 'B'):
-                    condition.attr('colorIfFalse%s' % axis).set(0)
+            # second axis info
+            refVectorZ = VM_N.getVectorFromMatrix(noTwistRef_grp.worldMatrix[0], planeVecs[1])
+            vectorZ_Proj = VM_N.projectVectorOntoPlane(refVectorZ, driverVector, True)
 
-                # power to control fallof
-                power = pm.createNode('multiplyDivide')
-                power.operation.set(3)  # set to power
-                condition.outColorR.connect(power.input1X)
-                power.input2X.set(falloff)  # Fallof create here some controller
-                # multiply by the maximum value to config the range
-                rangeMult = pm.createNode('multDoubleLinear')
-                power.outputX.connect(rangeMult.input1)
-                rangeMult.input2.set(range)  # range
-                # auto multiplier
-                multiplier = pm.createNode('multDoubleLinear')
-                rangeMult.output.connect(multiplier.input1)
-                multiplier.input2.set(1)
+            # x axis, useful later, for calculate de blend dot product
+            refVectorX = VM_N.getVectorFromMatrix(noTwistRef_grp.worldMatrix[0], childDriver)
 
-                # append
-                rangeNodesList.append(multiplier)
+            logger.debug('refVecY: %s' % str(refVectorY.get()))
+            logger.debug('refVecZ: %s' % str(refVectorZ.get()))
+            logger.debug('refVecX: %s' % str(refVectorX.get()))
 
-            driversRangeList.append(rangeNodesList)
+            # get vector dot products for z and y
+            vecProd_list = DGU.treeTracker(vectorZ_Proj.node(), 'vectorProduct', True, 4)  # search for vectorProducts
+            dotZ_node = [node for node in vecProd_list if node.operation.get() == 1][0]  # save here dor Node
+            vecProd_list = DGU.treeTracker(vectorY_Proj.node(), 'vectorProduct', True, 4)
+            dotY_node = [node for node in vecProd_list if node.operation.get() == 1][0]
+            # get the abs Val of one dot product
+            dotBlendAbs = VM_N.absVal(dotZ_node.outputX)
 
+            # reconstruct vectors with cross product
+            ZVer_crossY = VM_N.crossProduct(vectorZ_Proj, driverVector, True)
 
-        if len(driversRangeList) == 1:
-            for i, rootCtr in enumerate(rootsControllerList):
-                # connect to skirt
-                driversRangeList[0][i].output.connect(rootCtr[0].rotateZ)  # attribute variable?
+            YVer_crossZ = VM_N.crossProduct(driverVector, vectorY_Proj, True)
 
-        elif len(driversRangeList) == 2:
-            for i, rootCtr in enumerate(rootsControllerList):
-                # create blend color
-                condition = pm.createNode('condition')
-                condition.operation.set(2)  # greater than
-                # connect condition
-                driversRangeList[0][i].output.connect(condition.firstTerm)
-                driversRangeList[0][i].output.connect(condition.colorIfTrueR)
-                # second driver
-                driversRangeList[1][i].output.connect(condition.secondTerm)
-                driversRangeList[1][i].output.connect(condition.colorIfFalseR)
-                # connect to transform
-                condition.outColorR.connect(rootCtr[0].rotateZ)
+            # blend nodes, Z
+            blendZ = pm.createNode('blendColors')
+            dotBlendAbs.connect(blendZ.blender)
+            YVer_crossZ.connect(blendZ.color1)
+            vectorZ_Proj.connect(blendZ.color2)
+            # Y
+            blendY = pm.createNode('blendColors')
+            dotBlendAbs.connect(blendY.blender)
+            vectorY_Proj.connect(blendY.color1)
+            ZVer_crossY.connect(blendY.color2)
+
+            noTwistMatrix = VM_N.build4by4Matrix(driverVector, blendY.output, blendZ.output)
+
+            if autoGrpTotal_list:  # fixme
+                # if a previous system exists, get its inverse matrix, to avoid paren transform problems
+                mulMatrix = VM_N.multMatrix(noTwistMatrix, lastNoTwistRef_grp.worldInverseMatrix[0])
+                noTwistMatrix = mulMatrix
+
+                refNoOrientMatrix = VM_N.multMatrix(noTwistRef_grp.worldMatrix[0],lastNoTwistRef_grp.worldInverseMatrix[0])
+
+            else:
+                refNoOrientMatrix = noTwistRef_grp.worldMatrix[0]
 
 
-        # view controller attribute and auto attribute
-        # auto attribute
-        if not parent.hasAttr('skirtAuto'):
-            # create attr
-            pm.addAttr(parent, longName='skirtAuto', shortName='skirtAuto', minValue=0.0,
-                       type='float', defaultValue=1.0, k=True)
-        # connect node
-        for rangeNodesList in driversRangeList:
-            for multNode in rangeNodesList:
-                parent.skirtAuto.connect(multNode.input2)
+            noTwistDecMat = pm.createNode('decomposeMatrix')
+            noTwistMatrix.connect(noTwistDecMat.inputMatrix)
+            # connect decompose matrix to a group
+            noTwistGrp = driverVectorGrp.duplicate(po=True)[0]
+            noTwistGrp.rename('%s_noTwistGrp' % str(driver))
+            noTwistDecMat.outputRotate.connect(noTwistGrp.rotate)
 
-        # connect visibility
-        if not parent.hasAttr('skirtControllers'):
-            # create attr
-            pm.addAttr(parent, longName='skirtControllers', shortName='skirtControllers',
-                       type='bool', defaultValue=True, k=False)
-            pm.setAttr('%s.skirtControllers' % str(parent), channelBox=True)
-        # connect node
-        for fkChainctr in fkControllerList:
-            for fkCtr in fkChainctr:
-                parent.skirtControllers.connect(fkCtr.visibility)
+            # vector mask
+            # the projection of the driver over the ref plane, and normalized, we will use this to set the level
+            # if influence for each driver
+            # fixme: clean this zone
+            maskDotVDirection = pm.createNode('multiplyDivide')
+            maskDotVDirection.operation.set(1)
+            driverVector.connect(maskDotVDirection.input1)
+            maskDotVDirection.input2.set([invertDot, invertDot, invertDot])
+            # save plug
+            maskDotVector = VM_N.projectVectorOntoPlane(maskDotVDirection.output, refVectorX, True)
+
+            # get notwist grp world space translation
+            noTwistGrpTrans_plug = VM_N.getVectorFromMatrix(noTwistRef_grp.worldMatrix[0], [0,0,0,1])  # world space trans
+            ##connect with controllers##
+            # for each root, create a auto root
+            # connect with no twist grp, using dot product to evaluate the weight for each auto
+            autoGrp_list=[]
+            for i, root in enumerate(firstChainRoot):
+                # create auto grp, with no twist grp orient
+                autoGrp = pm.group(empty=True, name='%s_auto' % str(root))
+                pm.xform(autoGrp, ws=True, m=driverMatrix)  # get orient from ref
+                autoGrp.setTranslation(root.getTranslation('world'), 'world')  # get position from root
+                parent.addChild(autoGrp)
+                autoGrp.addChild(root)  # root as a child of the new auto  #review: maybe this at the end
+                if autoGrpTotal_list:
+                    # if a previus auto exists, make parent of the new auto
+                    autoGrpTotal_list[-1][i].addChild(autoGrp)
+                autoGrp_list.append(autoGrp)
+
+                # get autogrp vector
+                autoGrpVector = pm.createNode('plusMinusAverage')
+                autoGrpVector.operation.set(2)  # subtract
+                autoGrpTrans_plug = VM_N.getVectorFromMatrix(autoGrp.worldMatrix[0], [0,0,0,1])
+                autoGrpTrans_plug.connect(autoGrpVector.input3D[0])
+                noTwistGrpTrans_plug.connect(autoGrpVector.input3D[1])
+                # normalize grp vector
+                normalizeAutoGrpVec = pm.createNode('vectorProduct')
+                normalizeAutoGrpVec.operation.set(0)
+                normalizeAutoGrpVec.normalizeOutput.set(True)
+                autoGrpVector.output3D.connect(normalizeAutoGrpVec.input1)
+
+                # get iniDots
+                iniDotY = VM_N.dotProduct(refVectorY, normalizeAutoGrpVec.output)
+                iniDotZ = VM_N.dotProduct(refVectorZ, normalizeAutoGrpVec.output)
+                # get dots
+                dotXY = VM_N.dotProduct(refVectorY, maskDotVector)
+                dotXZ = VM_N.dotProduct(refVectorZ, maskDotVector)
+
+                # normalize values
+                normVal = abs(iniDotY.get()[0]) + abs(iniDotZ.get()[0])  # abs values, to avoid errors
+                normalizeNode = pm.createNode('multiplyDivide')
+                normalizeNode.operation.set(2)  # divide
+                for axis in 'XYZ':
+                    normalizeNode.attr('input2%s' % axis).set(normVal)
+                iniDotY.children()[0].connect(normalizeNode.input1Y)
+                iniDotZ.children()[0].connect(normalizeNode.input1Z)
+
+                # multiplyDots Z and Y
+                relDotY_node = pm.createNode('multDoubleLinear')
+                dotXY.children()[0].connect(relDotY_node.input1)
+                normalizeNode.outputY.connect(relDotY_node.input2)
+                # y
+                relDotZ_node = pm.createNode('multDoubleLinear')
+                dotXZ.children()[0].connect(relDotZ_node.input1)
+                normalizeNode.outputZ.connect(relDotZ_node.input2)
+                # plus z and y dot values
+                dotCtrBlend = pm.createNode('addDoubleLinear')
+                relDotY_node.output.connect(dotCtrBlend.input1)
+                relDotZ_node.output.connect(dotCtrBlend.input2)
+                # clamp dotCtrBlend
+                dotClamp = pm.createNode('clamp')
+                dotCtrBlend.output.connect(dotClamp.inputR)
+                dotClamp.max.set([1, 1, 1])
+
+
+                # blend orientations
+                """
+                orientationBlend = pm.createNode('blendColors')
+                dotClamp.outputR.connect(orientationBlend.blender)
+                noTwistDecMat.outputRotate.connect(orientationBlend.color1)
+                orientationBlend.color2.set(autoGrp.rotate.get())
+                """
+                # use blend between matrix
+                blendMatrix = pm.createNode('wtAddMatrix')
+                noTwistMatrix.connect(blendMatrix.wtMatrix[0].matrixIn)
+                dotClamp.outputR.connect(blendMatrix.wtMatrix[0].weightIn)
+                # create second weight matrix
+                secondWeight = pm.createNode('plusMinusAverage')
+                secondWeight.operation.set(2)
+                secondWeight.input1D[0].set(1)
+                dotClamp.outputR.connect(secondWeight.input1D[1])
+                # connect second matrix
+                refNoOrientMatrix.connect(blendMatrix.wtMatrix[1].matrixIn)
+                secondWeight.output1D.connect(blendMatrix.wtMatrix[1].weightIn)
+
+                # decompose matrix
+                decomposeMat = pm.createNode('decomposeMatrix')
+                blendMatrix.matrixSum.connect(decomposeMat.inputMatrix)
+                decomposeMat.outputRotate.connect(autoGrp.rotate)
+
+
+                # connect to auto grp
+                #orientationBlend.output.connect(autoGrp.rotate)
+
+            # store info of the last driver
+            lastNoTwistRef_grp = noTwistRef_grp
+            autoGrpTotal_list.append(autoGrp_list)
 
         # conenct to joints
         for i, pointChanCtr in enumerate(pointControllers):

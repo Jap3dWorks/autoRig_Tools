@@ -1395,7 +1395,6 @@ def jointChain(length=None, joints=10, curve=None):
 ####################################
 ##Nurbs surface or curve Operation##
 ####################################
-
 def curveToSurface(curve, width=5.0, steps=10):
     """
     Create a surface from a nurbsCurve, using a loft node.
@@ -1433,7 +1432,6 @@ def curveToSurface(curve, width=5.0, steps=10):
     # edit points
     newPoint = pm.datatypes.Point(0, 0, 0)
     setattr(newPoint, minAxis, width / 2.0)
-    print newPoint
     # edit cvPoints
     for j, curv in enumerate([dupCurve1, dupCurve2]):
         # rebuildCurve
@@ -1508,17 +1506,20 @@ class DependencyGraphUtils():
     Dependency graph utils, this class exists for organization porpoises
     """
     @staticmethod
-    def treeTracker(start, nodeType, inputs=True):
+    def treeTracker(start, nodeType, inputs=True, maxNodes=0):
         """
          Track since the start node all input graph or output graph, and return the
          desired nodetypes.
          :param start (str or pm):
          :param nodeType (str):
+         :param maxNodes: maximum of found nodes, 0 equal to no maximum
         """
         if isinstance(start, str):
             start = pm.PyNode(start)
         output = []  # store here the results
-        def treeTracker_Recursive(start, nodeType, inputs, output):
+        checkedNodes = set()
+
+        def treeTracker_Recursive(start, nodeType):
             """
              recursive func to run over the graph
             """
@@ -1531,24 +1532,30 @@ class DependencyGraphUtils():
             # transform all connectedInputs in connected nodes, and try to avoid duplicated nodes
             # with set() delete duplicated nodes from the list
             connectedNodes = set([plug.node() for plug in connectedPlugs])
+            connectedNodes.difference_update(checkedNodes)
+            checkedNodes.update(connectedNodes)
 
             # iterate over the found nodes
             for node in connectedNodes:
-                if node.type() == nodeType:
+                if maxNodes == 0 or maxNodes > len(output):
                     # if the node is od the node type, save it
-                    output.append(node)
+                    if node.type() == nodeType:
+                        output.append(node)
 
-                # check the inputs or outputs of the node
-                treeTracker_Recursive(node, nodeType, inputs, output)
+                    if maxNodes != 0 and maxNodes <= len(output):
+                        break
+                    else:
+                        # check the inputs or outputs of the node
+                        treeTracker_Recursive(node, nodeType)
 
         # start recursive process
-        treeTracker_Recursive(start, nodeType, inputs, output)
+        treeTracker_Recursive(start, nodeType)
 
         return output
 
 
 #####################
-##Vector Operations##
+##Vector and math Operations##
 #####################
 def checkVectorType(vector):
     """
@@ -1586,11 +1593,77 @@ def checkMatrixType(matrix):
     return matrix
 
 
-class VectorOperation_Nodes():
+class VectorMath_Nodes():
     """
     class based on common Node vector operations.
     This class exists for organize porpoises.
     """
+    @staticmethod
+    def multMatrix(*args):
+        """
+        return a plug with the result of multiply matrix
+        :param args: matrix plugs
+        :return:
+        """
+        multMatrixNode = pm.createNode('multMatrix')
+        for i, matrix in enumerate(args):
+            # check type
+            if isinstance(matrix, str):
+                matrix = pm.PyNode(matrix)
+            # connect matrix
+            matrix.connect(multMatrixNode.attr('matrixIn[%s]' % i))
+
+        # return the resultant matrix
+        return multMatrixNode.matrixSum
+
+
+    @staticmethod
+    def inverseMatrix(matrix):
+        """
+        return a Plug with the inversed matrix
+        :param matrix:
+        :return:
+        """
+        # check types
+        if isinstance(matrix, str):
+            matrix = pm.PyNode(matrix)
+
+        # create inverse matrix node
+        inverseNode = pm.createNode('inverseMatrix')
+        matrix.connect(inverseNode.inputMatrix)
+
+        return inverseNode.outputMatrix
+
+
+    @staticmethod
+    def absVal(value):
+        """
+        Return a plug with the abs value
+        :param value: plug
+        :return:
+        """
+        # check node types
+        if isinstance(value, str):
+            value = pm.PyNode(value)
+
+        # square power
+        powerNode = pm.createNode('multiplyDivide')
+        powerNode.operation.set(3)  #power
+        for axis in 'XYZ':
+            powerNode.attr('input2%s' % axis).set(2)
+
+        value.connect(powerNode.input1X)
+
+        # square root
+        squareNode = pm.createNode('multiplyDivide')
+        squareNode.operation.set(3)  # power
+        for axis in 'XYZ':
+            squareNode.attr('input2%s' % axis).set(.5)
+        powerNode.outputX.connect(squareNode.input1X)
+
+        return squareNode.outputX
+
+
     @staticmethod
     def dotProduct(vectorA, vectorB):
         """
@@ -1631,6 +1704,7 @@ class VectorOperation_Nodes():
             vectorB = pm.PyNode(vectorB)
 
         crossProduct = pm.createNode('vectorProduct')
+        crossProduct.operation.set(2)
         crossProduct.normalizeOutput.set(normalized)
         vectorA.connect(crossProduct.input1)
         vectorB.connect(crossProduct.input2)
@@ -1650,10 +1724,9 @@ class VectorOperation_Nodes():
         """
         ## check types ##
         # get args and values
-        argsStr = [VectorOperation_Nodes.build4by4Matrix.func_code.co_varnames[i] for i in
-                   range(VectorOperation_Nodes.build4by4Matrix.func_code.co_argcount - 1)]
+        argsStr = [VectorMath_Nodes.build4by4Matrix.func_code.co_varnames[i] for i in
+                   range(VectorMath_Nodes.build4by4Matrix.func_code.co_argcount - 1)]
 
-        print argsStr
         argVal = [locals()[arg] for arg in argsStr]
 
         # prepare dictionaries
@@ -1693,7 +1766,7 @@ class VectorOperation_Nodes():
 
 
     @staticmethod
-    def projectVectorOntoPlane(vectorOutput, vectorNormal):
+    def projectVectorOntoPlane(vectorOutput, vectorNormal, normalized=False):
         """
         Calculate the vector projection onto a plane
         :param vectorOutput(str or pm): attribute with the vector
@@ -1730,6 +1803,14 @@ class VectorOperation_Nodes():
         substractVector.operation.set(2)  # substract
         vectorOutput.connect(substractVector.input3D[0])
         normalMultiply.output.connect(substractVector.input3D[1])
+
+        # if normalized, return the vector normalized
+        if normalized:
+            normalizeVector = pm.createNode('vectorProduct')
+            normalizeVector.operation.set(0)  # no operation
+            normalizeVector.normalizeOutput.set(True)
+            substractVector.output3D.connect(normalizeVector.input1)
+            return normalizeVector.output
 
         return substractVector.output3D
 
@@ -1796,20 +1877,42 @@ class VectorOperation_Nodes():
         # check args types and create pm nodes
         if isinstance(matrix, str):
             matrix = pm.PyNode(matrix)
+        if isinstance(vector, list) or isinstance(vector, tuple) or isinstance(vector, set):
+            if len(vector) > 3:
+                vector = pm.datatypes.Point(vector)
+            else:
+                vector = pm.datatypes.Vector(vector)
 
-        # create vector Product
-        driverVecProduct = pm.createNode('vectorProduct')
-        driverVecProduct.normalizeOutput.set(True)
-        # connect matrix to the node
-        matrix.connect(driverVecProduct.matrix)
+        output = []
+        if vector.x + vector.y + vector.z:
+            # create vector Product
+            driverVecProduct = pm.createNode('vectorProduct')
+            driverVecProduct.normalizeOutput.set(True)
+            # connect matrix to the node
+            matrix.connect(driverVecProduct.matrix)
 
-        # set Vector product to vector matrix product
-        driverVecProduct.operation.set(3)  # 3 is matrix vector product
-        for i, attr in enumerate('XYZ'):
-            driverVecProduct.attr('input1%s' % attr).set(vector[i])
-        driverVecProduct.normalizeOutput.set(True)
+            # set Vector product to vector matrix product
+            driverVecProduct.operation.set(3)  # 3 is matrix vector product
+            for i, attr in enumerate('XYZ'):
+                driverVecProduct.attr('input1%s' % attr).set(getattr(vector, attr.lower()))
 
-        return driverVecProduct.output
+            driverVecProduct.normalizeOutput.set(True)
+
+            output.append(driverVecProduct.output)
+
+        if isinstance(vector, pm.datatypes.Point):
+            if vector.w:
+                transVecProduct = pm.createNode('vectorProduct')
+                transVecProduct.normalizeOutput.set(False)
+                matrix.connect(transVecProduct.matrix)
+                transVecProduct.operation.set(4)  # point matrix product
+
+                output.append(transVecProduct.output)
+
+        if len(output) > 1:
+            return output
+        else:
+            return output[0]
 
 
 class VectorOperations():
@@ -2372,8 +2475,8 @@ class WireCurve(System):
         # base Node system, vector between child points of the controllers
         # get transform worldSpace, point1
         # vectorProduct1 must be added later
-        vectorBetCtr, vectorProduct1, vectorProduct2 = VectorOperation_Nodes.getVectorBetweenTransforms(self.curvePoints[1], self.curvePoints[-2],
-                                                                                                        False)
+        vectorBetCtr, vectorProduct1, vectorProduct2 = VectorMath_Nodes.getVectorBetweenTransforms(self.curvePoints[1], self.curvePoints[-2],
+                                                                                                   False)
 
         # distance between points, useful later
         distanceBetween = pm.createNode('distanceBetween')
