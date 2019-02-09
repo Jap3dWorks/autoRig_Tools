@@ -1,9 +1,12 @@
 import pymel.core as pm
 import re
 from maya import OpenMaya
-import ctrSaveLoadToJson
-import ARCore
-reload(ARCore)
+
+from ARCore import ctrSaveLoadToJson
+import ARCore.ARCore as ARC
+import ARCore.ARHelper as ARH
+
+reload(ARC)
 reload(ctrSaveLoadToJson)  # review: reload
 
 import inspect
@@ -58,7 +61,7 @@ class RigAuto(object):
             self.mainCtr = self.create_controller('%s_main_ctr' % self.chName, 'main', 1, 18)
             self.ctrGrp.addChild(self.mainCtr)
         # connect main scale to grp joints
-        ARCore.connectAttributes(self.mainCtr, pm.PyNode('%s_joints_grp' % self.chName), ['scale'], ['X', 'Y', 'Z'])
+        ARC.connectAttributes(self.mainCtr, pm.PyNode('%s_joints_grp' % self.chName), ['scale'], ['X', 'Y', 'Z'])
 
         # I think i don't need this
         self.methodNames = [x[0] for x in inspect.getmembers(self, predicate=inspect.ismethod) if 'auto' in x[0]]
@@ -156,7 +159,7 @@ class RigAuto(object):
         pm.rebuildCurve(spineCurve, s=2, rpo=True, ch=False, rt=0, d=3, kt=0, kr=0)
 
         # review: test autoMethod
-        ARCore.snapCurveToPoints(spineJoints, spineCurve, 16, 0.01)
+        ARC.snapCurveToPoints(spineJoints, spineCurve, 16, 0.01)
 
         #TODO: nameController variable
         # create locators and connect to curve CV's
@@ -209,8 +212,8 @@ class RigAuto(object):
                 self.mainCtr.addChild(spineFKControllerList[0])
 
         # create roots grp
-        ARCore.createRoots(spineFKControllerList)
-        spineControllerRootsList = ARCore.createRoots(self.spineIKControllerList)
+        ARC.createRoots(spineFKControllerList)
+        spineControllerRootsList = ARC.createRoots(self.spineIKControllerList)
 
         # create points on curve that will drive the joints
         # this is like the main joint.
@@ -312,13 +315,13 @@ class RigAuto(object):
                 pm.parentConstraint(self.jointDriverList[n], joint, maintainOffset=True, name='%s_drv_%s_%s_1_parentConstraint' % (self.chName, zone, jointNameSplit))
 
         # stretch TODO: print spineJoints list
-        ARCore.stretchCurveVolume(spineCurve, spineJoints, '%s_%s' % (self.chName, zone), self.mainCtr)
+        ARH.stretchCurveVolume(spineCurve, spineJoints, '%s_%s' % (self.chName, zone), self.mainCtr)
 
         # lock and hide attributes
-        ARCore.lockAndHideAttr(self.spineIKControllerList[1:-1], False, True, True)  # ik Ctr, no hips and chest
-        ARCore.lockAndHideAttr(spineFKControllerList[1:], True, False, True)  # fk controller list, no hips
-        ARCore.lockAndHideAttr(spineFKControllerList[0], False, False, True)  # fk controller hips
-        ARCore.lockAndHideAttr([self.spineIKControllerList[0], self.spineIKControllerList[-1]], False, False, True)  # ik Ctr, hips and chest
+        ARC.lockAndHideAttr(self.spineIKControllerList[1:-1], False, True, True)  # ik Ctr, no hips and chest
+        ARC.lockAndHideAttr(spineFKControllerList[1:], True, False, True)  # fk controller list, no hips
+        ARC.lockAndHideAttr(spineFKControllerList[0], False, False, True)  # fk controller hips
+        ARC.lockAndHideAttr([self.spineIKControllerList[0], self.spineIKControllerList[-1]], False, False, True)  # ik Ctr, hips and chest
 
         # function for create extra content
         for func in funcs:
@@ -356,7 +359,7 @@ class RigAuto(object):
 
         # rebuildCurve
         pm.rebuildCurve(neckHeadCurve, s=2, rpo=True, ch=False, rt=0, d=3, kt=0, kr=0)
-        ARCore.snapCurveToPoints(neckHeadJoints[:-1], neckHeadCurve, 16, 0.01)
+        ARC.snapCurveToPoints(neckHeadJoints[:-1], neckHeadCurve, 16, 0.01)
 
         # create locators and connect to curve CV's
         neckHeadDrvList = []
@@ -421,8 +424,8 @@ class RigAuto(object):
         self.ikControllers['spine'][-1].addChild(neckHeadFKCtrList[0])
 
         # create roots grp
-        neckHeadFKCtrRoots = ARCore.createRoots(neckHeadFKCtrList)
-        neckHeadIKCtrRoots = ARCore.createRoots(self.neckHeadIKCtrList)
+        neckHeadFKCtrRoots = ARC.createRoots(neckHeadFKCtrList)
+        neckHeadIKCtrRoots = ARC.createRoots(self.neckHeadIKCtrList)
 
         # head orient auto, isolate
         # head orient neck grp
@@ -553,19 +556,19 @@ class RigAuto(object):
                 self.neckHeadIKCtrList[-1].rename(str(joint).replace('skin', 'ctr'))  # rename, useful for snap proxy model
                 pm.orientConstraint(self.neckHeadIKCtrList[-1], joint, maintainOffset=True, name='%s_%s_%s_1_drv_orientConstraint' % (self.chName, zone, jointNameSplit))
                 # connect scales
-                ARCore.connectAttributes(self.neckHeadIKCtrList[-1], joint, ['scale'], 'XYZ')
+                ARC.connectAttributes(self.neckHeadIKCtrList[-1], joint, ['scale'], 'XYZ')
 
             else:
                 self.neckHeadJointDriverList[n].rename(str(joint).replace('skin', 'main'))  # rename, useful for snap proxy model
                 pm.parentConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=True, name='%s_%s_%s_1_drv_parentConstraint' % (self.chName, zone, jointNameSplit))
 
         # stretch
-        ARCore.stretchCurveVolume(neckHeadCurve, neckHeadJoints[:-1], '%s_%s' % (self.chName, zone), self.mainCtr)
+        ARH.stretchCurveVolume(neckHeadCurve, neckHeadJoints[:-1], '%s_%s' % (self.chName, zone), self.mainCtr)
 
         # freeze and hide attributes.
-        ARCore.lockAndHideAttr(neckHeadFKCtrList, False, False, True)
+        ARC.lockAndHideAttr(neckHeadFKCtrList, False, False, True)
         # lock and hide neck attr, it's here because we have only one
-        ARCore.lockAndHideAttr(self.neckHeadIKCtrList[0], False, True, True)
+        ARC.lockAndHideAttr(self.neckHeadIKCtrList[0], False, True, True)
 
         # extra functions
         for func in funcs:
@@ -606,7 +609,7 @@ class RigAuto(object):
         self.mainCtr.addChild(self.ikFkCtrGrp)
 
         # sync ikFkTwistJoints index with ikFk joints index
-        ikFkTwistSyncJoints = ARCore.syncListsByKeyword(ikFkJoints, self.ikFkTwistJoints, 'twist')
+        ikFkTwistSyncJoints = ARC.syncListsByKeyword(ikFkJoints, self.ikFkTwistJoints, 'twist')
 
         # fk controllers are copies of ikFk joints
         # save controllers name
@@ -664,7 +667,7 @@ class RigAuto(object):
 
                 else:
                     # connect and setup ikFk Twist Ini chain
-                    ARCore.twistJointsConnect(ikFkTwistIni, self.ikFk_MainJointList[-1], '%s_%s_%s_%s' % (self.chName, controllerName, zoneA, side))
+                    ARH.twistJointsConnect(ikFkTwistIni, self.ikFk_MainJointList[-1], '%s_%s_%s_%s' % (self.chName, controllerName, zoneA, side))
 
             NameIdList.append(controllerName)
 
@@ -695,11 +698,11 @@ class RigAuto(object):
 
         # save to list
         self.ikFk_IkControllerList.append(self.ikFk_IkControl)
-        ARCore.createRoots(self.ikFk_IkControllerList)
+        ARC.createRoots(self.ikFk_IkControllerList)
 
         # fkRoots
-        self.ikFk_FkCtrRoots = ARCore.createRoots(self.ikFk_FkControllersList)
-        ARCore.createRoots(self.ikFk_FkControllersList, 'auto')
+        self.ikFk_FkCtrRoots = ARC.createRoots(self.ikFk_FkControllersList)
+        ARC.createRoots(self.ikFk_FkControllersList, 'auto')
 
         # set preferred angle
         self.ikFk_IkJointList[1].preferredAngleZ.set(-15)
@@ -709,7 +712,7 @@ class RigAuto(object):
         self.ikFk_IkControl.addChild(ikHandle)
         # create poles
         ikFkPoleController = self.create_controller('%s_%s_%s_pole_ik_ctr' % (self.chName, zoneA, side), 'pole',2)
-        ARCore.relocatePole(ikFkPoleController, self.ikFk_IkJointList, 35)  # relocate pole Vector
+        ARC.relocatePole(ikFkPoleController, self.ikFk_IkJointList, 35)  # relocate pole Vector
         self.ikFkCtrGrp.addChild(ikFkPoleController)
         pm.addAttr(ikFkPoleController, ln='polePosition', at='enum', en="world:root:foot", k=True)
         # save poleVector
@@ -719,8 +722,8 @@ class RigAuto(object):
         pm.poleVectorConstraint(ikFkPoleController, ikHandle)
 
         # root poleVector
-        ikFkPoleVectorAuto = ARCore.createRoots([ikFkPoleController])
-        ARCore.createRoots([ikFkPoleController])
+        ikFkPoleVectorAuto = ARC.createRoots([ikFkPoleController])
+        ARC.createRoots([ikFkPoleController])
 
         # TODO: more abstract
         # poleVectorAttributes
@@ -776,10 +779,10 @@ class RigAuto(object):
             ###Strech###
             # fk strech
             # review this part, it could be cool only one func
-            ikFk_MainDistances, ikFk_MaxiumDistance = ARCore.calcDistances(self.ikFk_MainJointList)  # review:  legIkJointList[0]   legIkCtrRoot
+            ikFk_MainDistances, ikFk_MaxiumDistance = ARC.calcDistances(self.ikFk_MainJointList)  # review:  legIkJointList[0]   legIkCtrRoot
             #ikFkStretchSetup
-            ARCore.stretchIkFkSetup(self.ikFk_FkCtrRoots[1:], ikFk_MainDistances, self.ikFkshape, [self.ikFk_IkJointList[0], ikHandle],
-                                    ikFk_MaxiumDistance, self.ikFk_IkJointList[1:], self.ikFk_MainJointList[1:], ikFkTwistList, '%s_%s_%s' % (self.chName, zoneA, side), self.mainCtr, ikFkPoleController)
+            ARH.stretchIkFkSetup(self.ikFk_FkCtrRoots[1:], ikFk_MainDistances, self.ikFkshape, [self.ikFk_IkJointList[0], ikHandle],
+                                             ikFk_MaxiumDistance, self.ikFk_IkJointList[1:], self.ikFk_MainJointList[1:], ikFkTwistList, '%s_%s_%s' % (self.chName, zoneA, side), self.mainCtr, ikFkPoleController)
 
         # iterate along main joints
         # blending
@@ -805,9 +808,9 @@ class RigAuto(object):
             # if twist joints, we could desire bending controls or not
             if bendingBones:
                 # todo: name args
-                ARCore.twistJointBendingBoneConnect(parent, self.ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints, self.chName, zone, side, NameIdList, self.path)
+                ARH.twistJointBendingBoneConnect(parent, self.ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints, self.chName, zone, side, NameIdList, self.path)
             else:
-                ARCore.twistJointConnect(self.ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints)
+                ARH.twistJointConnect(self.ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints)
 
         # or connect the rig with not twist joints
         else:
@@ -824,9 +827,9 @@ class RigAuto(object):
 
         # lock and hide attributes
         # lock and hide ik ctr scale attr
-        ARCore.lockAndHideAttr(self.ikFk_IkControl, False, False, True)
-        ARCore.lockAndHideAttr(self.ikFk_FkControllersList, True, False, True)
-        ARCore.lockAndHideAttr(ikFkPoleController, False, True, True)
+        ARC.lockAndHideAttr(self.ikFk_IkControl, False, False, True)
+        ARC.lockAndHideAttr(self.ikFk_FkControllersList, True, False, True)
+        ARC.lockAndHideAttr(ikFkPoleController, False, True, True)
 
         # function for create foots or hands
         for func in funcs:
@@ -865,7 +868,7 @@ class RigAuto(object):
         footJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*skin_joint$' % (self.chName, zoneB, self.lastSide), str(point)) and not zoneC in str(point)]
 
         # arrange toes by joint chain p.e [[toea, toesa_Tip], [toeb, toeb_tip]]
-        toesJointsArr = ARCore.arrangeListByHierarchy(toesJoints)
+        toesJointsArr = ARC.arrangeListByHierarchy(toesJoints)
 
         # controllers and main lists
         footFkControllerList = []  # fk lists
@@ -890,7 +893,7 @@ class RigAuto(object):
             # get transformMatrix and orient new controller
             matrix = pm.xform(footFkCtr, ws=True, q=True, m=True)
 
-            matrix = ARCore.VectorOperations.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
+            matrix = ARC.VectorOperations.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
             pm.xform(footFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             # fk control Shape
@@ -924,7 +927,7 @@ class RigAuto(object):
 
         # twistJointsConnections
         if self.ikFkTwistJoints:
-            ARCore.twistJointsConnect(self.footTwstList, footMainJointsList[0], '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self.lastSide), self.footpointCnstr)
+            ARH.twistJointsConnect(self.footTwstList, footMainJointsList[0], '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self.lastSide), self.footpointCnstr)
 
         # TODO: function from joint, ik, fk, main?
         # create toe Fk and ik ctr
@@ -1048,15 +1051,15 @@ class RigAuto(object):
         toesIkControllerList.append(toeIkGeneralController)
 
         # fk Roots and autos
-        ARCore.createRoots(footFkControllerList)
-        ARCore.createRoots(footFkControllerList, 'auto')
-        ARCore.createRoots(footIkControllerList)
-        footRollAuto = ARCore.createRoots(footFootRollCtr, 'footRollAuto')  # review: all in the same if
-        footIkAuto = ARCore.createRoots(footIkControllerList, 'auto')
-        ARCore.createRoots(toesFkControllerList)
-        toesFkAuto = ARCore.createRoots(toesFkControllerList, 'auto')
-        ARCore.createRoots(toesIkControllerList)
-        toesIkAuto = ARCore.createRoots(toesIkControllerList, 'auto')
+        ARC.createRoots(footFkControllerList)
+        ARC.createRoots(footFkControllerList, 'auto')
+        ARC.createRoots(footIkControllerList)
+        footRollAuto = ARC.createRoots(footFootRollCtr, 'footRollAuto')  # review: all in the same if
+        footIkAuto = ARC.createRoots(footIkControllerList, 'auto')
+        ARC.createRoots(toesFkControllerList)
+        toesFkAuto = ARC.createRoots(toesFkControllerList, 'auto')
+        ARC.createRoots(toesIkControllerList)
+        toesIkAuto = ARC.createRoots(toesIkControllerList, 'auto')
 
         # toe Statick  # review, move fingers
         if len(toeMainParents) > 1:
@@ -1175,11 +1178,11 @@ class RigAuto(object):
         footTotalFkControllers=footFkControllerList + toesFkControllerList
 
         # lock and hide attributes. after root creation
-        ARCore.lockAndHideAttr(footTotalFkControllers, True, False, True)   # fk controllers
+        ARC.lockAndHideAttr(footTotalFkControllers, True, False, True)   # fk controllers
         #ARCore.lockAndHideAttr(toesIkControllerList[-1], True, False, True)
-        ARCore.lockAndHideAttr(footIkControllerList[0], False, False, True)  # ik ctr foot
-        ARCore.lockAndHideAttr(footIkControllerList[1:], True, False, True)  # walk ik controllers
-        ARCore.lockAndHideAttr(toesIkControllerList, True, False, True)  # toes ik controllers
+        ARC.lockAndHideAttr(footIkControllerList[0], False, False, True)  # ik ctr foot
+        ARC.lockAndHideAttr(footIkControllerList[1:], True, False, True)  # walk ik controllers
+        ARC.lockAndHideAttr(toesIkControllerList, True, False, True)  # toes ik controllers
 
 
         return footIkControllerList + toesIkControllerList, footTotalFkControllers
@@ -1205,7 +1208,7 @@ class RigAuto(object):
         handJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*((?!twist).).*skin_joint$' % (self.chName, zoneB, self.lastSide), str(point)) and not zoneC in str(point)]
 
         # arrange toes by joint chain p.e [[toea, toesa_Tip], [toeb, toeb_tip]]
-        fingerJointsArr = ARCore.arrangeListByHierarchy(fingerJoints)
+        fingerJointsArr = ARC.arrangeListByHierarchy(fingerJoints)
         logger.debug('Finger arranged list %s %s: %s' % (zoneB, self.lastSide, fingerJointsArr))
 
         # controllers and main lists
@@ -1228,7 +1231,7 @@ class RigAuto(object):
             # get transformMatrix and orient new controller TODO: function
             matrix = pm.xform(handFkCtr, ws=True, q=True, m=True)
 
-            matrix = ARCore.VectorOperations.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
+            matrix = ARC.VectorOperations.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
             pm.xform(handFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             if not handFkControllerList:
@@ -1255,9 +1258,9 @@ class RigAuto(object):
 
         # twistJointsConnections
         if self.ikFkTwistJoints:
-            ARCore.twistJointsConnect(self.footTwstList, handMainJointsList[0],
+            ARH.twistJointsConnect(self.footTwstList, handMainJointsList[0],
                                       '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self.lastSide),
-                                      self.footpointCnstr)
+                                               self.footpointCnstr)
 
         # create finger Fk and ik ctr
         # last hand fkCtr, easiest access later
@@ -1295,12 +1298,12 @@ class RigAuto(object):
         self.ikFk_IkControllerList.remove(self.ikFk_IkControl)
 
         # fk Roots and autos
-        ARCore.createRoots(handFkControllerList)
-        ARCore.createRoots(handFkControllerList, 'auto')
-        ARCore.createRoots(handIkControllerList)
-        footIkAuto = ARCore.createRoots(handIkControllerList, 'auto')
-        ARCore.createRoots(fingerMainJointsList)
-        toesIkAuto = ARCore.createRoots(fingerMainJointsList, 'auto')
+        ARC.createRoots(handFkControllerList)
+        ARC.createRoots(handFkControllerList, 'auto')
+        ARC.createRoots(handIkControllerList)
+        footIkAuto = ARC.createRoots(handIkControllerList, 'auto')
+        ARC.createRoots(fingerMainJointsList)
+        toesIkAuto = ARC.createRoots(fingerMainJointsList, 'auto')
 
         ## BLEND ##
         # orient constraint main to ik or fk foot
@@ -1326,7 +1329,7 @@ class RigAuto(object):
                 pm.orientConstraint(handFkControllerList[i], mainJoint, maintainOffset=True,
                                                        name='%s_%s_%s_%s_mainBlending_orientConstraint' % (self.chName, self.lastZone, controllerName, self.lastSide))
 
-            ARCore.lockAndHideAttr(handFkControllerList[i], True, False, False)
+            ARC.lockAndHideAttr(handFkControllerList[i], True, False, False)
 
             # connect to deform skeleton
             mainJoint.rename(str(handJoints[i]).replace('skin', 'main'))  # rename, useful for snap proxy model
@@ -1402,8 +1405,8 @@ class RigAuto(object):
         self.plusMinusIkFk.output1D.connect(clavicleSwingCrt.getShape().visibility)
 
         # create roots
-        ARCore.createRoots(clavicleMainList)
-        clavicleAutoGrpList = ARCore.createRoots(clavicleMainList, 'auto')
+        ARC.createRoots(clavicleMainList)
+        clavicleAutoGrpList = ARC.createRoots(clavicleMainList, 'auto')
 
         # auto clavicle
         autoClavicleName = 'auto%s' % zone.capitalize()
@@ -1454,9 +1457,9 @@ class RigAuto(object):
             if rootMatrix == clusterMatrix and len(clusterRoot.listRelatives(c=True)) == 1:
                 pass
             else:
-                clusterRoot = ARCore.createRoots([cluster])
+                clusterRoot = ARC.createRoots([cluster])
         else:
-            clusterRoot = ARCore.createRoots([cluster])
+            clusterRoot = ARC.createRoots([cluster])
 
         # look if cluster is relative
         # we need cluster DGnode
@@ -1478,11 +1481,11 @@ class RigAuto(object):
         #parent
         parent.addChild(controller)
         # create root
-        controllerRoot = ARCore.createRoots([controller])
+        controllerRoot = ARC.createRoots([controller])
 
         # connect controllr and cluster
         pm.parentConstraint(controller, cluster, maintainOffset=False, name='%s_parentConstraint' % str(cluster))
-        ARCore.connectAttributes(controller, cluster, ['scale'], 'XYZ')
+        ARC.connectAttributes(controller, cluster, ['scale'], 'XYZ')
 
         return [controller], []
 
@@ -1494,12 +1497,12 @@ class RigAuto(object):
         """
         color = 7 if self.lastSide == 'left' else 5
         # create wire deformer
-        wire, curve = ARCore.setWireDeformer(self.ikFk_MainJointList, mesh, '%s_%s_%s' % (self.chName, self.lastZone, self.lastSide))
+        wire, curve = ARC.setWireDeformer(self.ikFk_MainJointList, mesh, '%s_%s_%s' % (self.chName, self.lastZone, self.lastSide))
         # Find base curve
         baseCurve = wire.baseWire[0].inputs()[0]
         # get controls
-        curveTransforms = ARCore.transformDriveNurbObjectCV(curve)
-        baseCurveTransforms = ARCore.transformDriveNurbObjectCV(baseCurve)
+        curveTransforms = ARC.transformDriveNurbObjectCV(curve)
+        baseCurveTransforms = ARC.transformDriveNurbObjectCV(baseCurve)
 
         # vinculate to rig
         for i, trn in enumerate(curveTransforms):
@@ -1525,9 +1528,9 @@ class RigAuto(object):
                 controller.setRotation((0, 0, 0), 'object')
                 controller.addChild(trn)  # child of the controller
                 # create Roots
-                ARCore.createRoots([controller])
+                ARC.createRoots([controller])
                 # lock and hide attributes
-                ARCore.lockAndHideAttr(controller, False, True, True)
+                ARC.lockAndHideAttr(controller, False, True, True)
 
         # curves to no xform grp
         self.noXformGrp.addChild(curve.getTransform())
@@ -1571,7 +1574,7 @@ class RigAuto(object):
         controllerName = '_'.join(baseName)
 
         controller = self.create_controller(controllerName, 'pole', 1.8, 24)
-        latticeList = ARCore.latticeBendDeformer(lattice, controller)
+        latticeList = ARC.latticeBendDeformer(lattice, controller)
 
         # parent
         latticeList.append(latticeBase)
@@ -1597,12 +1600,12 @@ class RigAuto(object):
         :return:
         """
         # simplify names from modules
-        VM_N = ARCore.VectorMath_Nodes
-        DGU = ARCore.DependencyGraphUtils
+        VM_N = ARC.VectorMath_Nodes
+        DGU = ARC.DependencyGraphUtils
 
         skirtJoints = [point for point in pm.ls() if re.match('^%s.*(%s).*joint$' % (self.chName, zone), str(point))]
         # arrange lists by hierarchy
-        skirtJointsArrange = ARCore.arrangeListByHierarchy(skirtJoints)
+        skirtJointsArrange = ARC.arrangeListByHierarchy(skirtJoints)
 
         # get drivers positions
         driversPos = []
@@ -1642,7 +1645,7 @@ class RigAuto(object):
         # create roots
         firstChainRoot = []
         for fkCtrChain in fkControllerList:
-            root = ARCore.createRoots(fkCtrChain)
+            root = ARC.createRoots(fkCtrChain)
             firstChainRoot.append(root[0])
 
         driverVectors_list = []  # node with aligned x vector of the driver
@@ -1895,13 +1898,13 @@ class RigAuto(object):
             pointControllers.append(controller)
 
         # roots
-        ARCore.createRoots(pointControllers)
+        ARC.createRoots(pointControllers)
 
         # conenct to joints
         for i, joint in enumerate(pointJoints):
             pm.pointConstraint(pointControllers[i], joint, maintainOffset=False)
             pm.orientConstraint(pointControllers[i], joint, maintainOffset=False)
-            ARCore.connectAttributes(pointControllers[i], joint,['scale'], 'XYZ')
+            ARC.connectAttributes(pointControllers[i], joint, ['scale'], 'XYZ')
 
 
 
@@ -1914,5 +1917,5 @@ class RigAuto(object):
             controller: pymel transformNode
             transformMatrix: stored position
         """
-        controller = ARCore.createController(name, controllerType, self.chName, self.path, s, colorIndex)
+        controller = ARC.createController(name, controllerType, self.chName, self.path, s, colorIndex)
         return controller

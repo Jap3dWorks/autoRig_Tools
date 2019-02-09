@@ -1,2 +1,2 @@
 # autoRig_Tools
-auto rig tools for maya
+Auto rig tools for maya
