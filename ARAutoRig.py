@@ -23,7 +23,7 @@ logger.setLevel(logging.DEBUG)
 # akona_spine_chest_IK_ctr
 # akona_arm_left_foreArm_twist1_jnt
 
-class RigAuto(object):
+class AutoRig(object):
 
     def __init__(self, chName, path):
         """

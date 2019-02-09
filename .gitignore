@@ -1,2 +1,14 @@
 
 notes\.psd
+
+ARTools/__init__\.pyc
+
+ARTools/ARpicker_UI\.pyc
+
+ARTools/ARTools\.pyc
+
+ARTools/ARUtils\.pyc
+
+*.pyc
+
+\.idea/workspace\.xml

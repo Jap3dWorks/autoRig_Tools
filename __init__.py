@@ -1,8 +1,8 @@
-import autoRig
+import ARAutoRig
 import ARCore
 import ARTools
 
 #### reloads ####
-reload(autoRig)
+reload(ARAutoRig)
 reload(ARTools)
 reload(ARCore)
