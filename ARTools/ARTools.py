@@ -7,7 +7,7 @@ from maya import mel
 import re
 import pymel.core as pm
 import math
-import ARCore
+from ARCore import ARCore as ARC
 
 import logging
 logging.basicConfig()
@@ -717,9 +717,9 @@ def variableFkTool(curve, numJoints, numControllers=3):
         curve = curve.getShape()
 
     # create joint chain
-    joints = ARCore.jointChain(None, numJoints, curve)
+    joints = ARC.jointChain(None, numJoints, curve)
 
-    ARCore.variableFk(joints, curve, numControllers)
+    ARC.variableFk(joints, curve, numControllers)
 
 
 class PickerTools(object):
@@ -799,7 +799,7 @@ class MirrorControllers(object):
         self.axis = axis
         selection = pm.ls(sl=True)
         # find symetry controllers from selection
-        self.symetryControls, self.noSymetryControls = ARCore.findMirrorPoints(selection, axis)
+        self.symetryControls, self.noSymetryControls = ARC.findMirrorPoints(selection, axis)
 
         logger.info('Mirror Controllers store')
 
@@ -829,12 +829,12 @@ class MirrorControllers(object):
             # inver positions
             for pairCtr in self.symetryControls:
                 matrix1 = pm.xform(pairCtr[0], ws=worldSpace, q=True, m=True)
-                matrix1 = ARCore.checkMatrixType(matrix1)
-                invMatrix1 = ARCore.VectorOperations.reflectedMatrix(matrix1, reflMatrix)
+                matrix1 = ARC.checkMatrixType(matrix1)
+                invMatrix1 = ARC.VectorOperations.reflectedMatrix(matrix1, reflMatrix)
 
                 matrix2 = pm.xform(pairCtr[1], ws=worldSpace, q=True, m=True)
-                matrix2 = ARCore.checkMatrixType(matrix2)
-                invMatrix2 = ARCore.VectorOperations.reflectedMatrix(matrix2, reflMatrix)
+                matrix2 = ARC.checkMatrixType(matrix2)
+                invMatrix2 = ARC.VectorOperations.reflectedMatrix(matrix2, reflMatrix)
 
                 # apply matrix
                 pm.xform(pairCtr[0], ws=worldSpace, m=invMatrix2)
@@ -842,7 +842,7 @@ class MirrorControllers(object):
 
             for ctr in self.noSymetryControls:
                 matrix = pm.xform(ctr, ws=worldSpace, q=True, m=True)
-                invMatrix = ARCore.VectorOperations.reflectedMatrix(matrix, reflMatrix)
+                invMatrix = ARC.VectorOperations.reflectedMatrix(matrix, reflMatrix)
                 # apply
                 pm.xform(ctr, ws=worldSpace, m=invMatrix)
 
@@ -855,7 +855,7 @@ class MirrorControllers(object):
                 negativeIndex = 1 - positiveIndex
 
                 matrixPositive = pm.xform(pairCtr[positiveIndex], ws=worldSpace, q=True, m=True)
-                flipMatrix = ARCore.VectorOperations.reflectedMatrix(matrixPositive, reflMatrix)
+                flipMatrix = ARC.VectorOperations.reflectedMatrix(matrixPositive, reflMatrix)
 
                 # apply matrix
                 pm.xform(pairCtr[negativeIndex], ws=worldSpace, m=flipMatrix)

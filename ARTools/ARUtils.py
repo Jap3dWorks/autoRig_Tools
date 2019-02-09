@@ -5,7 +5,6 @@ from maya import mel
 import re
 import pymel.core as pm
 import math
-import ARCore
 
 import logging
 logging.basicConfig()

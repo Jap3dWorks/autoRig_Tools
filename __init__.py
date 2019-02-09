@@ -1,10 +1,8 @@
 import autoRig
-from ARCore import ctrSaveLoadToJson
-from ARTools import ARTools
 import ARCore
+import ARTools
 
 #### reloads ####
 reload(autoRig)
-reload(ctrSaveLoadToJson)
 reload(ARTools)
 reload(ARCore)
