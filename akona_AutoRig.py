@@ -26,35 +26,26 @@ def akonaRigA(name='akona', path='D:\_docs\_Animum\Akona'):
     for side in sides:
         akonaRig.ikFkChain_auto(side, akonaRig.ikControllers['spine'][0], 'leg', True, True,
                                 lambda: akonaRig.foot_auto(('foot', 'toe'), 'zx'))
-
+    """
     # arms
     for side in sides:
         akonaRig.ikFkChain_auto(side, akonaRig.ikControllers['spine'][-1], 'arm', True, False,
                                 lambda: akonaRig.hand_auto(('hand', 'finger'), None),
                                 lambda: akonaRig.clavicle_auto('clavicle'),  # cluster here for the costume
                                 lambda: akonaRig.ikFkChain_wire('akona_body_mesh'))
-
+    """
     ## skirt ##  # review: save main list too
     skirtDrivers = ['akona_leg_left_upperLeg_main_joint', 'akona_leg_right_upperLeg_main_joint']
-    # left
-    for chain in 'BCDEF':
-        akonaRig.PSSkirt_auto('skirt%s' % chain, sides[0], [skirtDrivers[0]],akonaRig.ikControllers['spine'][0], 0, 1.5,80)
-    # right
-    for chain in 'JKLMN':
-        akonaRig.PSSkirt_auto('skirt%s' % chain, sides[1], [skirtDrivers[1]],akonaRig.ikControllers['spine'][0], 0, 1.5,80)
+    akonaRig.PSSkirt_auto('skirt', skirtDrivers, akonaRig.ikControllers['spine'][0], 0, 1.5, 80)
 
-    # front back
-    akonaRig.PSSkirt_auto('skirt', 'front', skirtDrivers,akonaRig.ikControllers['spine'][0],0,1.5,80)
-    akonaRig.PSSkirt_auto('skirt', 'back', skirtDrivers,akonaRig.ikControllers['spine'][0],0,1.5,80)
-
+    return
     ## hair ##
     akonaRig.point_auto('hair', akonaRig.ikControllers['neckHead'][-1])
-
     ## clusters ##
-    akonaRig.addCluster('akona_lapel_right_cluster', akonaRig.fkControllers['clavicle_right'], 'pole',.5)
-    akonaRig.addCluster('akona_lapel_left_cluster', akonaRig.fkControllers['clavicle_left'], 'pole',.5)
-    akonaRig.addCluster('akona_skirtLapel_right_cluster','akona_skirtO2_front_point_ctr','pole',.5)
-    akonaRig.addCluster('akona_skirtLapel_left_cluster','akona_skirtB2_left_point_ctr','pole',.5)
+    akonaRig.addCluster('akona_lapel_right_cluster', akonaRig.fkControllers['clavicle_right'], 'pole', .5)
+    akonaRig.addCluster('akona_lapel_left_cluster', akonaRig.fkControllers['clavicle_left'], 'pole', .5)
+    akonaRig.addCluster('akona_skirtLapel_right_cluster', 'akona_skirtO2_front_point_ctr', 'pole', .5)
+    akonaRig.addCluster('akona_skirtLapel_left_cluster', 'akona_skirtB2_left_point_ctr', 'pole', .5)
 
 
     ## hide annoying things
