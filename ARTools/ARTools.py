@@ -1,13 +1,13 @@
 # tools for use the rig
 
-from maya import cmds
+import maya.cmds as cmds
 from maya import OpenMaya
 from maya import OpenMayaAnim
-from maya import mel
+import maya.mel as mel
 import re
 import pymel.core as pm
 import math
-from ARCore import ARCore as ARC
+from ..ARCore import ARCore as ARC  # relative path ..
 
 import logging
 logging.basicConfig()
@@ -84,6 +84,7 @@ class PSDUtils(object):
 
             pm.poseInterpolator(poseSel, edit=True, goToPose='neutral')
 
+
     @staticmethod
     def deltaCorrective(joints, bShape):
         """
@@ -135,6 +136,7 @@ class PSDUtils(object):
                 bShape.addTarget(mesh, weightIndex, deltaShape, 1.0)
 
                 joint.setRotation([0, 0, 0], 'object')
+
 
     @staticmethod
     def getDelta(positive, negative, base):
@@ -255,6 +257,7 @@ class PSDUtils(object):
         baseDup.getTransform().rename('delta')
         return baseDup
 
+
     @staticmethod
     def getDeltaByJointAngle(positive, negative, skinMesh,  joint):
         """
@@ -331,6 +334,7 @@ class PSDUtils(object):
 
             baseMeshShape.setPoint(index, sculptVector + jointPos, 'world')
 
+
     @staticmethod
     def connectBlendShape(blendshapeNode, blendShapeTarget):
         """
@@ -380,6 +384,7 @@ class PSDUtils(object):
                         return
                     except:
                         return
+
 
     @staticmethod
     def connectBlendShapes(blendshapeNode):
@@ -434,10 +439,11 @@ class CopyDeforms(object):
         pm.copySkinWeights(ss=skinCluster, ds=copySkinCluster, noMirror=True, surfaceAssociation='closestPoint',
                            influenceAssociation=('closestJoint', 'closestJoint'))
 
+
     @staticmethod
     def copyBlendShape(blendShapeAttr, targetMesh):
         """
-        disconnect a blend shape, connect a mesh with a wrap then clone mesh that mesh
+        disconnect a blend shape, connect a mesh with a wrap then clone that mesh
         Args:
             blendShapeAttr: blend shape attribute to clone
             targetMesh: target mesh where apply the wrap modifier
@@ -529,155 +535,8 @@ class CopyDeforms(object):
         return BlendShapeNode, BSNames
 
     @staticmethod
-    def copyClusterWeights(deformer, mesh):
-        # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
-        # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_set_html  # mfnSet
-        # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_weight_geometry_filter_html  # geometryFilter
-        """
-        copy cluster weights between meshes
-        :param deformer(str): cluster deformer name
-        :param mesh2(str): mesh shape where copy weights
-        :return:
-        """
-        # util
-        util = OpenMaya.MScriptUtil()
-
-        # get cluster
-        mSelection = OpenMaya.MSelectionList()
-        mSelection.add(deformer)
-        mSelection.add(mesh)
-        # deformer
-        deformerMObject = OpenMaya.MObject()
-        mSelection.getDependNode(0, deformerMObject)
-
-        # weight mfn
-        weightGeometryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
-        membersSelList = OpenMaya.MSelectionList()
-        fnSet = OpenMaya.MFnSet(weightGeometryFilter.deformerSet())  # set components affected
-        fnSet.getMembers(membersSelList, False)  # add to selection list
-        dagPathComponents = OpenMaya.MDagPath()
-        components = OpenMaya.MObject()
-        membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
-        # get original weights
-        originalWeight = OpenMaya.MFloatArray()
-        weightGeometryFilter.getWeights(0, components, originalWeight)  # review documentation
-
-        # get target mfn and all point positions
-        targetDPath = OpenMaya.MDagPath()
-        mSelection.getDagPath(1, targetDPath)
-        if targetDPath.apiType() is OpenMaya.MFn.kTransform:
-            targetDPath.extendToShape()  # if is ktransform type. get the shape
-        # target It
-        targetIt = OpenMaya.MItMeshVertex(targetDPath)
-
-        # deformer vertex iterator
-        sourceVertIt = OpenMaya.MItMeshVertex(dagPathComponents, components)
-        sourceMFn = OpenMaya.MFnMesh(dagPathComponents)
-        # list index on set fn
-        sourceVertexId = OpenMaya.MIntArray()
-        while not sourceVertIt.isDone():
-            sourceVertexId.append(sourceVertIt.index())
-            sourceVertIt.next()
-
-        sourceVertIt.reset()
-        logger.debug('source vertex id: %s' % sourceVertexId)
-
-        targetDeformVId = OpenMaya.MIntArray()
-        targetSelList = OpenMaya.MSelectionList()
-        newWeights = OpenMaya.MFloatArray()
-        lastLength = 0  # useful to find valid vertex
-        # closest vertex from target to source
-        # review, optimize
-        while not targetIt.isDone():
-            TVid = targetIt.index()
-            TargetPoint = targetIt.position()
-            closestPoint = OpenMaya.MPoint()
-            ptr = util.asIntPtr()
-            sourceMFn.getClosestPoint(TargetPoint, closestPoint, OpenMaya.MSpace.kObject, ptr)
-            polyId = util.getInt(ptr)
-
-            # get vertices from face id
-            vertexId = OpenMaya.MIntArray()
-            # gives the vertex in non clock direction
-            sourceMFn.getPolygonVertices(polyId, vertexId)
-            vertexLength = vertexId.length()
-            weightList=[]
-            totalArea = 0
-            areaList=[]
-            totalWeight = 0
-            # polygonArea
-            # sourceVertIt.setIndex(polyId)
-            # iterate over the face vertex
-            # check if any vertex is in the list of source vertex
-            # TODO: review calculations, and try to optimize
-            if set(vertexId) & set(sourceVertexId):
-                for i, Vid in enumerate(vertexId):
-                    # check first if any vertex is in the list
-                    # calculate relative weight.
-                    # get distance from vertex.
-                    DistPoint = OpenMaya.MPoint()
-                    sourceMFn.getPoint(Vid, DistPoint)  # get weighted vertex position
-                    DistVector = OpenMaya.MVector(closestPoint - DistPoint)
-                    vectorA = OpenMaya.MPoint()  # vectorA
-                    sourceMFn.getPoint(vertexId[i-1], vectorA)
-                    vectorB = OpenMaya.MPoint()  # vertorB
-                    sourceMFn.getPoint(vertexId[(i+1) % vertexLength], vectorB)
-                    # contruct baricentric vectors
-                    # documentation: http://blackpawn.com/texts/pointinpoly/
-                    vectorA = OpenMaya.MVector(vectorA - DistPoint)
-                    vectorB = OpenMaya.MVector(vectorB - DistPoint)
-                    #denominator
-                    denom = ((vectorA*vectorA)*(vectorB*vectorB)-(vectorA*vectorB)*(vectorB*vectorA))
-                    # u and V
-                    u = ((vectorB*vectorB)*(DistVector*vectorA)-(vectorB*vectorA)*(DistVector*vectorB))/denom
-                    v = ((vectorA*vectorA)*(DistVector*vectorB)-(vectorA*vectorB)*(DistVector*vectorA))/denom
-                    areaVector = (vectorA*(1-u) ^ vectorB*(1-v)).length()
-                    totalArea += areaVector
-                    areaList.append(areaVector)
-
-                    # get wheights
-                    if Vid in sourceVertexId:
-                        weightIndex = list(sourceVertexId).index(Vid)  # get the vertex list index, valid for the weight list
-                        sourceWeight = originalWeight[weightIndex]  # get weight value from the list
-                    else:
-                        sourceWeight = 0
-                    weightList.append(sourceWeight)
-
-                    # save valid vertex index. only once.
-                    if not TVid in targetDeformVId:
-                        targetDeformVId.append(TVid)
-                        # save components in a selection list. this way we can add it to our set
-                        targetSelList.add(targetDPath, targetIt.currentItem())
-
-            # now calculate and assign weight value
-            newLength = targetDeformVId.length()
-            if lastLength < newLength:
-                weightTarget = 0
-                for i, area in enumerate(areaList):
-                    weightTarget += (area/totalArea)*weightList[i]
-
-                newWeights.append(weightTarget)
-                lastLength = newLength
-
-            targetIt.next()
-
-        # add to mfnSet
-        fnSet.addMembers(targetSelList)
-        PaintSelList = OpenMaya.MSelectionList()
-        fnSet.getMembers(PaintSelList, False)
-
-        # calculate weights
-        # get from selection list
-        components = OpenMaya.MObject()
-        targetNewWDPath = OpenMaya.MDagPath()
-        for i in range(PaintSelList.length()):
-            # check we have desired dagpath
-            PaintSelList.getDagPath(i, targetNewWDPath, components)
-            if targetNewWDPath.partialPathName() == targetDPath.partialPathName():
-                break
-        print newWeights
-        weightGeometryFilter.setWeight(targetNewWDPath, components, newWeights)
-
+    def addToDeformer_Tool(deformer, mesh):
+        ARC.DeformerOp.addToDeformer(deformer, mesh)
 """
 --Example Copy deformers--
 
@@ -830,11 +689,11 @@ class MirrorControllers(object):
             for pairCtr in self.symetryControls:
                 matrix1 = pm.xform(pairCtr[0], ws=worldSpace, q=True, m=True)
                 matrix1 = ARC.checkMatrixType(matrix1)
-                invMatrix1 = ARC.VectorOperations.reflectedMatrix(matrix1, reflMatrix)
+                invMatrix1 = ARC.VectorMath.reflectedMatrix(matrix1, reflMatrix)
 
                 matrix2 = pm.xform(pairCtr[1], ws=worldSpace, q=True, m=True)
                 matrix2 = ARC.checkMatrixType(matrix2)
-                invMatrix2 = ARC.VectorOperations.reflectedMatrix(matrix2, reflMatrix)
+                invMatrix2 = ARC.VectorMath.reflectedMatrix(matrix2, reflMatrix)
 
                 # apply matrix
                 pm.xform(pairCtr[0], ws=worldSpace, m=invMatrix2)
@@ -842,7 +701,7 @@ class MirrorControllers(object):
 
             for ctr in self.noSymetryControls:
                 matrix = pm.xform(ctr, ws=worldSpace, q=True, m=True)
-                invMatrix = ARC.VectorOperations.reflectedMatrix(matrix, reflMatrix)
+                invMatrix = ARC.VectorMath.reflectedMatrix(matrix, reflMatrix)
                 # apply
                 pm.xform(ctr, ws=worldSpace, m=invMatrix)
 
@@ -855,7 +714,7 @@ class MirrorControllers(object):
                 negativeIndex = 1 - positiveIndex
 
                 matrixPositive = pm.xform(pairCtr[positiveIndex], ws=worldSpace, q=True, m=True)
-                flipMatrix = ARC.VectorOperations.reflectedMatrix(matrixPositive, reflMatrix)
+                flipMatrix = ARC.VectorMath.reflectedMatrix(matrixPositive, reflMatrix)
 
                 # apply matrix
                 pm.xform(pairCtr[negativeIndex], ws=worldSpace, m=flipMatrix)

@@ -61,7 +61,7 @@ class AutoRig(object):
             self.mainCtr = self.create_controller('%s_main_ctr' % self.chName, 'main', 1, 18)
             self.ctrGrp.addChild(self.mainCtr)
         # connect main scale to grp joints
-        ARC.connectAttributes(self.mainCtr, pm.PyNode('%s_joints_grp' % self.chName), ['scale'], ['X', 'Y', 'Z'])
+        ARC.DGUtils.connectAttributes(self.mainCtr, pm.PyNode('%s_joints_grp' % self.chName), ['scale'], ['X', 'Y', 'Z'])
 
         # I think i don't need this
         self.methodNames = [x[0] for x in inspect.getmembers(self, predicate=inspect.ismethod) if 'auto' in x[0]]
@@ -556,7 +556,7 @@ class AutoRig(object):
                 self.neckHeadIKCtrList[-1].rename(str(joint).replace('skin', 'ctr'))  # rename, useful for snap proxy model
                 pm.orientConstraint(self.neckHeadIKCtrList[-1], joint, maintainOffset=True, name='%s_%s_%s_1_drv_orientConstraint' % (self.chName, zone, jointNameSplit))
                 # connect scales
-                ARC.connectAttributes(self.neckHeadIKCtrList[-1], joint, ['scale'], 'XYZ')
+                ARC.DGUtils.connectAttributes(self.neckHeadIKCtrList[-1], joint, ['scale'], 'XYZ')
 
             else:
                 self.neckHeadJointDriverList[n].rename(str(joint).replace('skin', 'main'))  # rename, useful for snap proxy model
@@ -893,7 +893,7 @@ class AutoRig(object):
             # get transformMatrix and orient new controller
             matrix = pm.xform(footFkCtr, ws=True, q=True, m=True)
 
-            matrix = ARC.VectorOperations.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
+            matrix = ARC.VectorMath.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
             pm.xform(footFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             # fk control Shape
@@ -1231,7 +1231,7 @@ class AutoRig(object):
             # get transformMatrix and orient new controller TODO: function
             matrix = pm.xform(handFkCtr, ws=True, q=True, m=True)
 
-            matrix = ARC.VectorOperations.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
+            matrix = ARC.VectorMath.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
             pm.xform(handFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             if not handFkControllerList:
@@ -1485,7 +1485,7 @@ class AutoRig(object):
 
         # connect controllr and cluster
         pm.parentConstraint(controller, cluster, maintainOffset=False, name='%s_parentConstraint' % str(cluster))
-        ARC.connectAttributes(controller, cluster, ['scale'], 'XYZ')
+        ARC.DGUtils.connectAttributes(controller, cluster, ['scale'], 'XYZ')
 
         return [controller], []
 
@@ -1497,7 +1497,7 @@ class AutoRig(object):
         """
         color = 7 if self.lastSide == 'left' else 5
         # create wire deformer
-        wire, curve = ARC.setWireDeformer(self.ikFk_MainJointList, mesh, '%s_%s_%s' % (self.chName, self.lastZone, self.lastSide))
+        wire, curve = ARC.DeformerOp.setWireDeformer(self.ikFk_MainJointList, mesh, '%s_%s_%s' % (self.chName, self.lastZone, self.lastSide))
         # Find base curve
         baseCurve = wire.baseWire[0].inputs()[0]
         # get controls
@@ -1538,6 +1538,7 @@ class AutoRig(object):
         self.noXformGrp.addChild(baseCurve.getTransform())
         baseCurve.visibility.set(False)
 
+        # TODO: return controllers
         return [], []
 
     def latticeBend_auto(self, lattice, parent):
@@ -1574,7 +1575,7 @@ class AutoRig(object):
         controllerName = '_'.join(baseName)
 
         controller = self.create_controller(controllerName, 'pole', 1.8, 24)
-        latticeList = ARC.latticeBendDeformer(lattice, controller)
+        latticeList = ARC.DeformerOp.latticeBendDeformer(lattice, controller)
 
         # parent
         latticeList.append(latticeBase)
@@ -1601,7 +1602,7 @@ class AutoRig(object):
         """
         # simplify names from modules
         VM_N = ARC.VectorMath_Nodes
-        DGU = ARC.DependencyGraphUtils
+        DGU = ARC.DGUtils
 
         skirtJoints = [point for point in pm.ls() if re.match('^%s.*(%s).*joint$' % (self.chName, zone), str(point))]
         # arrange lists by hierarchy
@@ -1904,7 +1905,7 @@ class AutoRig(object):
         for i, joint in enumerate(pointJoints):
             pm.pointConstraint(pointControllers[i], joint, maintainOffset=False)
             pm.orientConstraint(pointControllers[i], joint, maintainOffset=False)
-            ARC.connectAttributes(pointControllers[i], joint, ['scale'], 'XYZ')
+            ARC.DGUtils.connectAttributes(pointControllers[i], joint, ['scale'], 'XYZ')
 
 
 

@@ -1,6 +1,6 @@
 from pymel import core as pm
 
-from ARCore import attrBlending, createController, jointPointToController
+from ARCore import DGUtils, createController, jointPointToController
 
 
 def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ikJoints, mainJoints, twsitMainJoints, nameInfo, main, poleVector=None):
@@ -126,7 +126,7 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
         # connect to joint
         # with pole Vector snap
         if poleVector:
-            ikStretchOutput = attrBlending(distanceBetweenPoleList[i], multiplyTranslate, nodeAttr.attr(snapPoleAttrStr), nameInfo, joint.translateX)
+            ikStretchOutput = DGUtils.attrBlending(distanceBetweenPoleList[i], multiplyTranslate, nodeAttr.attr(snapPoleAttrStr), nameInfo, joint.translateX)
 
             multiplyTranslate = ikStretchOutput
         else:
@@ -163,12 +163,12 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
         fkCVNode = conserveVolumeAnimNode(conserveVolumeAnimCurve, i, fkCVScaleFactorInvert, fkConserveVolumeScaleFactor, nameInfo)
         # main blending
         # connect to joint
-        attrBlending(ikCVNode, fkCVNode, nodeAttr.attr('ikFk'), '%s_conserveVolume' % nameInfo, CVJoint.scaleY, CVJoint.scaleZ)
+        DGUtils.attrBlending(ikCVNode, fkCVNode, nodeAttr.attr('ikFk'), '%s_conserveVolume' % nameInfo, CVJoint.scaleY, CVJoint.scaleZ)
 
     # to main joints formula: A+(B-A)*blend for joint, add twistBones, and stretch too
     for i, fkOut in enumerate(outputFk):
         # blending
-        plusMinusToMain = attrBlending(outputIk[i], fkOut, nodeAttr.attr('ikFk'), '%s_stretch' % nameInfo, mainJoints[i].translateX)
+        plusMinusToMain = DGUtils.attrBlending(outputIk[i], fkOut, nodeAttr.attr('ikFk'), '%s_stretch' % nameInfo, mainJoints[i].translateX)
         # stretch to twist joints
 
         if twsitMainJoints:
