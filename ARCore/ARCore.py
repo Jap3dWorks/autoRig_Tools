@@ -1,5 +1,5 @@
 import pymel.core as pm
-from maya import cmds
+import maya.cmds as cmds
 from maya import OpenMaya
 from maya import OpenMayaAnim
 import ctrSaveLoadToJson
@@ -246,42 +246,6 @@ def lockAndHideAttr(obj, translate=False, rotate=False, scale=False):
                 pm.setAttr('%s.scale%s' % (str(item), axis), channelBox=False, keyable=False)
 
 
-def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
-    """
-    create circuitry nodes to blend ik value to fk value
-    Args:
-        ikNode(pm.dependNode): node with stretch ik values
-        fkNode(pm.dependNode): node with stretch Fk values
-        blendAttr: attribute that will direct the blend
-        nameInfo: str  with name info p.e('akona_lowerLeg_leg')
-        args(pm.attributes): attributes to connect with the blend. pe. mainJoint.translateX (pm object)
-    Return:
-        last node with the blend info
-    """
-    # TODO: name scalable
-    ikOutputType = 'outputX' if isinstance(ikNode, pm.nodetypes.MultiplyDivide) else 'distance' if isinstance(ikNode, pm.nodetypes.DistanceBetween) else 'output1D'
-    fKoutputType = 'outputX' if isinstance(fkNode, pm.nodetypes.MultiplyDivide) else 'distance' if isinstance(fkNode, pm.nodetypes.DistanceBetween) else 'output1D'
-
-    plusMinusBase=pm.createNode('plusMinusAverage', name='%s_blending_plusMinusAverage' % nameInfo)
-    plusMinusBase.operation.set(2)  # substract
-    ikNode.attr(ikOutputType).connect(plusMinusBase.input1D[0])
-    fkNode.attr(fKoutputType).connect(plusMinusBase.input1D[1])
-    # multiply
-    multiplyNode = pm.createNode('multiplyDivide', name='%s_blending_multiplyDivide' % nameInfo)
-    blendAttr.connect(multiplyNode.input1X)
-    plusMinusBase.output1D.connect(multiplyNode.input2X)
-    # plus Fk
-    plusIkFkBlend = pm.createNode('plusMinusAverage', name='%s_blendingPlusFk_plusMinusAverage' % nameInfo)
-    multiplyNode.outputX.connect(plusIkFkBlend.input1D[0])
-    fkNode.attr(fKoutputType).connect(plusIkFkBlend.input1D[1])
-
-    # connect to main attributes
-    for arg in args:
-        plusIkFkBlend.output1D.connect(arg)
-
-    return plusIkFkBlend
-
-
 def calcDistances(pointList,vector=False):
     """
     Calculate de distance between the points in the given list. 0->1, 1->2, 2->3...
@@ -463,41 +427,574 @@ def snapCurveToPoints(points, curve, iterations=4, precision=0.05):
 
     mfnNurbsCurve.updateCurve()
 
-
-def connectAttributes(driver, driven, attributes, axis):
+class APIHelp:
     """
-    connect the attributes of the given objects
-    Args:
-        driver: source of the connection
-        driven: destiny of the connection
-        attributes: attributes to connect p.e scale, translate
-        axis: axis of the attribute p.e ['X', 'Y', 'Z'] or XYZ
+    Help Operations for the maya API
     """
-    for attribute in attributes:
-        for axi in axis:
-            driver.attr('%s%s' % (attribute, axi)).connect(driven.attr('%s%s' % (attribute, axi)))
-
+    pass
 
 #######################
 ##Deformer operations##
 #######################
+class DeformerOp:
 
-def getSkinedMeshFromJoint(joint):
-    """
-    Find meshes affected by the joint
-    :param joint (pm or str): joint
-    :return (set): Meshes affected by the joint
-    """
-    # create pm objects from list
-    joint = pm.PyNode(joint) if isinstance(joint, str) else joint
-    # find skin clusters
-    skinClusterLst = set(joint.listConnections(type='skinCluster'))
+    class BlendShapesOP:
+        def __init__(self):
+            self._BSWeights = None
+            self._symetryWeights = None
+            self._symetryID = None
 
-    meshes = []
-    for skin in skinClusterLst:
-        meshes += skin.getGeometry()
 
-    return set(meshes)
+        def inverValues(self):
+            """
+            Invert vertex weight values
+            :return:
+            """
+            for i in range(self._BSWeights.length()):
+                self._BSWeights[i] = 1.0 - self._BSWeights[i]
+
+
+        def setSymetryData(self, mesh, axis="x"):
+            """
+            set symmetry data
+            :param mesh: Base mesh to set the symmetry
+            :param axis:
+            """
+            self._symetryWeights, self._symetryID = MeshOp.barycentricSym(mesh, axis)
+
+
+        def mirrorWeights(self):
+            """
+            Mirror the data in BSWeights
+            :param BSNode:
+            :return:
+            """
+            oldWeights = OpenMaya.MFloatArray(self._BSWeights)
+            for i in range(oldWeights.length()):
+                newWeight = 0.0
+                for j, axis in enumerate("xyz"):
+                    newWeight += getattr(self._symetryWeights[i], axis) * oldWeights[self._symetryID[i * 3 + j]]
+
+                self._BSWeights[i] = newWeight
+
+
+        def setBlendSWeights(self, BSNode):
+            """
+            Set the Blend shape weights with the float array values
+            :param BSNode:
+            :return:
+            """
+            arraySize, weightAttr = self._setGetCommon(BSNode)
+
+            if arraySize != self._BSWeights.length():
+                logger.info("mFloatArray do not has the correct size")
+                return
+
+            for i in range(arraySize):
+                weightAttr[i].set(self._BSWeights[i])
+
+
+        def getBlendSWeights(self, BSNode):
+            """
+            Get the blend shape node weights per vertex
+            :param BSNode:
+            :return:
+            """
+            arraySize, weightAttr = self._setGetCommon(BSNode)
+
+            # set the array with the total of points, mFloatArray is faster
+            self._BSWeights = OpenMaya.MFloatArray(arraySize, 0.0)
+
+            for i in range(arraySize):
+                self._BSWeights.set(weightAttr[i].get(), i)
+
+
+        def _setGetCommon(self, BSNode):
+            """
+            Common between get and set bs weights
+            must call plug_weight.destructHandle(dataHandle) at the end
+            :param BSNode (str):
+            :return:
+            """
+            """
+            # get DN
+            mSelection = OpenMaya.MSelectionList()
+            mSelection.add(BSNode)
+            mDNBlendShape = OpenMaya.MObject()
+            mSelection.getDependNode(0, mDNBlendShape)
+
+            # get MFNDepNode
+            mFnDepNode = OpenMaya.MFnDependencyNode(mDNBlendShape)
+            # get plug
+            plug_weightInputT = mFnDepNode.findPlug('inputTarget', True)
+            plug_weightCompound = plug_weightInputT.elementByLogicalIndex(0)
+            plug_weight = plug_weightCompound.child(1)  # index number 1
+
+            dataHandle = plug_weight.asMDataHandle()
+            arrayDataHandle = OpenMaya.MArrayDataHandle(dataHandle)
+
+            # iterate over the mplug array
+            # set the array with the total of points
+            mFloatArray = OpenMaya.MFloatArray(arraySize, 0.0)
+            pmAttr = pm.PyNode(plug_weight.info())
+
+            for i in range(numElements):
+                #arrayDataHandle.jumpToArrayElement(i)
+                #arrayId = arrayDataHandle.elementIndex()
+                #mFloatArray.set(arrayDataHandle.outputValue().asFloat(), arrayId)
+                mFloatArray.set(pmAttr[i].get(), i)
+
+            return plug_weight, arrayDataHandle, dataHandle, arraySize
+
+            # remember to call:
+            # destruct handle must be called
+            plug_weight.destructHandle(dataHandle)
+
+            # to update the node
+            #BSNodePM = pm.PyNode(BSNode)
+            #BSNodePM.nodeState.set(0)
+            """
+
+            # get total vertex in mesh
+            mesh = pm.PyNode(str(BSNode)).outputGeometry.outputs()[0].getShape()
+            arraySize = mesh.numVertices()
+            weightAttr = pm.PyNode('%s.inputTarget[0].baseWeights' % BSNode)
+
+            return arraySize, weightAttr
+
+
+    @staticmethod
+    def smoothDeformerWeights(deformer):
+        """
+        smooth deformer weights.
+        :param deformer(str): Deformer name
+        """
+        mSelection = OpenMaya.MSelectionList()
+        mSelection.add(deformer)
+        # deformer
+        deformerMObject = OpenMaya.MObject()
+        mSelection.getDependNode(0, deformerMObject)
+
+        # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
+        # weight mfn
+        weightGeometryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
+        membersSelList = OpenMaya.MSelectionList()
+        fnSet = OpenMaya.MFnSet(weightGeometryFilter.deformerSet())  # set components affected
+        fnSet.getMembers(membersSelList, False)  # add to selection list
+        dagPathComponents = OpenMaya.MDagPath()
+        components = OpenMaya.MObject()
+        membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
+
+        # get original weights
+        originalWeight = OpenMaya.MFloatArray()
+        weightGeometryFilter.getWeights(0, components, originalWeight)
+
+        # mesh
+        meshVertIt = OpenMaya.MItMeshVertex(dagPathComponents)
+
+        newWeights = OpenMaya.MFloatArray()
+        # calculate new weights
+        while not meshVertIt.isDone():
+            index = meshVertIt.index()
+            connectedVertices = OpenMaya.MIntArray()
+            meshVertIt.getConnectedVertices(connectedVertices)
+
+            averageValue = originalWeight[index]
+            for vertex in connectedVertices:
+                averageValue += originalWeight[vertex]
+
+            newWeights.append(averageValue / (connectedVertices.length() + 1))
+
+            meshVertIt.next()
+
+        # set new weights
+        weightGeometryFilter.setWeight(dagPathComponents, components, newWeights)
+
+
+    @staticmethod
+    def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
+        """
+        Create a curve and wire deformer using joint position as reference
+        :param joints(pm or str): joints
+            mesh(list): list of meshes wire will affect
+        :return: wire deformer and created curve
+        nameInfo: characterName_zone_side
+        """
+        # create pm objects from list
+        joints = [pm.PyNode(joint) if isinstance(joint, str) else joint for joint in joints]
+
+        # get points
+        points = [joint.getTranslation('world') for joint in joints]
+        logger.debug('Wire Deformer curve points: %s' % points)
+
+        # If curve arg is None, create a two point curve
+        if not curve:
+            curve = pm.curve(ep=[points[0], points[-1]], d=2, name=str(nameInfo) + '_wire_curve')
+            # adjust curve points
+            snapCurveToPoints(joints, curve)
+
+        # if not mesh arg, get a random mesh trough the skinCluster
+        if not mesh:
+            mesh = DeformerOp.getSkinedMeshFromJoint(joints[0]).pop()
+        else:
+            # check type node
+            if isinstance(mesh, str):
+                mesh = pm.PyNode(mesh)
+            if isinstance(mesh, pm.nodetypes.Transform):
+                mesh = mesh.getShape()
+
+        # get affected vertex
+        affectedVertex = vertexIntoCurveCilinder(str(mesh), str(curve.getShape()), 15, .05, .98)
+
+        # create wire deformer
+        wire, wireCurve = pm.wire(mesh, gw=False, w=curve, dds=(0, 40))
+        logger.debug('wire curve: %s' % wireCurve)
+        pm.percent(wire, mesh, v=0)
+        for index in affectedVertex:
+            pm.percent(wire, mesh.vtx[index], v=1)
+
+        # copyDeformerWeights  ->  command for copy, mirror deformer weights
+        # smooth weights
+        for i in range(4):
+            DeformerOp.smoothDeformerWeights(str(wire))
+
+        return wire, curve
+
+
+    @staticmethod
+    def latticeBendDeformer(lattice, controller=None):
+        """
+        connect a bend deformer to a lattice, and the necessary nodes.
+        Controller should have transforms to zero.
+        :param lattice: lattice transform or shape
+        :param controller: Controller for the system
+        :return(list): Transform nodes created in the function:  scaleGrp, referenceBase, referenceController, bendTransform,
+        :return: controllerRoot
+        """
+        # TODO: test with non world aligned lattices
+        # TODO: class?
+        # check data type
+        # check lattice type data
+        if isinstance(lattice, str):
+            lattice = pm.PyNode(lattice)
+        if isinstance(lattice, pm.nodetypes.Transform):
+            lattice = lattice.getShape()
+
+        # check controller type
+        if isinstance(controller, str):
+            controller = pm.PyNode(controller)
+        if not isinstance(controller, pm.nodetypes.Transform):
+            logger.info('controller must be a transform node')
+            return
+
+        latticeTransform = lattice.getTransform()
+        # check lattice visibility, important to query correctly the bbox
+        if not latticeTransform.visibility.get():
+            latticeTransform.visibility.set(True)
+
+        # lattice bbox
+        latticeTransform = lattice.getTransform()
+        latBbox = latticeTransform.boundingBox()
+        logger.debug('LatBboc: %s' % latBbox)
+
+        # Util transform  data
+        centerPoint = (latBbox[0] + latBbox[1]) / 2
+        logger.debug('Lattice center point: %s, %s' % (centerPoint, type(centerPoint)))
+        # min and max centered points
+        minPoint = pm.datatypes.Point(centerPoint[0], latBbox[0][1], centerPoint[2])
+        maxPoint = pm.datatypes.Point(centerPoint[0], latBbox[1][1], centerPoint[2])
+        latHigh = latBbox[1][1] - latBbox[0][1]
+
+        # reposition controller
+        controller.setTranslation(maxPoint, 'world')
+        # root the controller
+        controllerRoot = createRoots([controller])[0]
+
+        # create bend deformer
+        # review, get some warnings here, maybe cmds is a better option
+        bend, bendTransform = cmds.nonLinear(str(lattice), type='bend', lowBound=-1, curvature=0)
+        bendTransform = pm.PyNode(bendTransform)
+        bendTransform.setTranslation(minPoint, 'world')
+        cmds.setAttr('%s.lowBound' % (bend), 0)
+        cmds.setAttr('%s.highBound' % (bend), 1)
+        # set scale lattice
+        bendTransform.scale.set([latHigh, latHigh, latHigh])
+
+        ## create nodes ##
+        distanceBettween = pm.createNode('distanceBetween')
+        distanceBettween.point2.set([0, 0, 0])
+        # don't connect y component
+        for axis in ('X', 'Z'):
+            controller.attr('translate%s' % axis).connect(distanceBettween.attr('point1%s' % axis))
+
+        # condition, to avoid vector with length 0
+        condition = pm.createNode('condition')
+        distanceBettween.distance.connect(condition.firstTerm)
+        conditionAxis = ['R', 'B']
+        for i, axis in enumerate(['X', 'Z']):
+            controller.attr('translate%s' % axis).connect(condition.attr('colorIfFalse%s' % conditionAxis[i]))
+
+        condition.colorIfFalseG.set(0)
+        condition.colorIfTrue.set([0.001, 0, 0])
+
+        # normalizeVector
+        normalize = pm.createNode('vectorProduct')
+        normalize.operation.set(0)
+        normalize.normalizeOutput.set(True)  # normalized
+        condition.outColor.connect(normalize.input1)
+        # find vector z, use cross product
+        crossProduct = pm.createNode('vectorProduct')
+        crossProduct.normalizeOutput.set(True)  # normalize
+        crossProduct.operation.set(2)
+        normalize.output.connect(crossProduct.input1)
+        crossProduct.input2.set([0, 1, 0])
+        # create fourByFour matrix
+        matrix = pm.createNode('fourByFourMatrix')
+        # vector X
+        for i, axis in enumerate(['X', 'Y', 'Z']):
+            normalize.attr('output%s' % axis).connect(matrix.attr('in0%s' % i))
+        # vector Z
+        for i, axis in enumerate(['X', 'Y', 'Z']):
+            crossProduct.attr('output%s' % axis).connect(matrix.attr('in2%s' % i))
+
+        # decompose Matrix
+        decomposeMatrix = pm.createNode('decomposeMatrix')
+        matrix.output.connect(decomposeMatrix.inputMatrix)
+        # connect rotation
+        decomposeMatrix.outputRotate.connect(bendTransform.rotate)
+
+        ## curvature ##
+        decomposeMatrixController = pm.createNode('decomposeMatrix')
+        controller.worldMatrix.connect(decomposeMatrixController.inputMatrix)
+        # transformNodes
+        referenceController = pm.group(empty=True, name='%s_ctr_ref' % str(latticeTransform))
+        pm.xform(referenceController, ws=True, m=pm.xform(controller, q=True, ws=True, m=True))
+        referenceBase = pm.group(empty=True, name='%s_base_ref' % str(latticeTransform))
+        referenceBase.setTranslation(minPoint, 'world')
+        # ref Controller
+        RefControllerDecMatr = pm.createNode('decomposeMatrix')
+        referenceController.worldMatrix.connect(RefControllerDecMatr.inputMatrix)
+        # base
+        refBaseDecMatr = pm.createNode('decomposeMatrix')
+        referenceBase.worldMatrix.connect(refBaseDecMatr.inputMatrix)
+        # firstVector
+        vector1 = pm.createNode('plusMinusAverage')
+        vector1.operation.set(2)  # substract
+        decomposeMatrixController.outputTranslate.connect(vector1.input3D[0])
+        refBaseDecMatr.outputTranslate.connect(vector1.input3D[1])
+        # second vector
+        vector2 = pm.createNode('plusMinusAverage')
+        vector2.operation.set(2)  # substract
+        RefControllerDecMatr.outputTranslate.connect(vector2.input3D[0])
+        refBaseDecMatr.outputTranslate.connect(vector2.input3D[1])
+        # calculate angle
+        angleBetween = pm.createNode('angleBetween')
+        vector1.output3D.connect(angleBetween.vector1)
+        vector2.output3D.connect(angleBetween.vector2)
+        # connect to bend
+        cmds.connectAttr('%s.angle' % (str(angleBetween)), '%s.curvature' % bend)
+
+        ## scale system ##
+        scaleGrp = pm.group(empty=True, name='%s_scale_grp' % str(latticeTransform))
+        scaleGrp.setTranslation(minPoint, 'world')
+        scaleGrp.addChild(latticeTransform)
+        # node connection
+        # distance between controller and base lattice
+        distanceBettween = pm.createNode('distanceBetween')
+        controller.worldMatrix.connect(distanceBettween.inMatrix1)
+        referenceBase.worldMatrix.connect(distanceBettween.inMatrix2)
+        # distance between controller REFERENCE and base lattice
+        distanceReference = pm.createNode('distanceBetween')
+        referenceController.worldMatrix.connect(distanceReference.inMatrix1)
+        referenceBase.worldMatrix.connect(distanceReference.inMatrix2)
+        # divide by the original length
+        multiplyDivide = pm.createNode('multiplyDivide')
+        multiplyDivide.operation.set(2)  # set to divide
+        # connect distances
+        distanceBettween.distance.connect(multiplyDivide.input1X)
+        distanceReference.distance.connect(multiplyDivide.input2X)
+        # get inverse
+        inverse = pm.createNode('multiplyDivide')
+        inverse.operation.set(2)  # divide
+        inverse.input1X.set(1)
+        multiplyDivide.outputX.connect(inverse.input2X)
+        # connect result to scale group
+        multiplyDivide.outputX.connect(scaleGrp.scaleY)
+        for axis in ('X', 'Z'):
+            inverse.outputX.connect(scaleGrp.attr('scale%s' % axis))
+
+        # lock and hide attr
+        lockAndHideAttr(controller, False, True, True)
+
+        return [scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot]
+
+
+    @staticmethod
+    def addToDeformer(deformer, mesh):
+        # TODO: move to ARCore necessary to
+        # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
+        # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_set_html  # mfnSet
+        # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_weight_geometry_filter_html  # geometryFilter
+        """
+        Add a mesh to the deformer, and copy weights between the new mesh and the existent mesh in the deformer
+        :param deformer(str): deformer name
+        :param mesh2(str): mesh shape where copy weights
+        :return:
+        """
+        # util
+        util = OpenMaya.MScriptUtil()
+
+        # get cluster
+        mSelection = OpenMaya.MSelectionList()
+        mSelection.add(deformer)
+        mSelection.add(mesh)
+        # deformer
+        deformerMObject = OpenMaya.MObject()
+        mSelection.getDependNode(0, deformerMObject)
+
+        # weight mfn
+        weightGeometryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
+        membersSelList = OpenMaya.MSelectionList()
+        fnSet = OpenMaya.MFnSet(weightGeometryFilter.deformerSet())  # set components affected
+        fnSet.getMembers(membersSelList, False)  # add to selection list
+        dagPathComponents = OpenMaya.MDagPath()
+        components = OpenMaya.MObject()
+        membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
+        # get original weights
+        originalWeight = OpenMaya.MFloatArray()
+        weightGeometryFilter.getWeights(0, components, originalWeight)  # review documentation
+
+        # get target mfn and all point positions
+        targetDPath = OpenMaya.MDagPath()
+        mSelection.getDagPath(1, targetDPath)
+        if targetDPath.apiType() is OpenMaya.MFn.kTransform:
+            targetDPath.extendToShape()  # if is ktransform type. get the shape
+        # target It
+        targetIt = OpenMaya.MItMeshVertex(targetDPath)
+
+        # deformer vertex iterator
+        sourceVertIt = OpenMaya.MItMeshVertex(dagPathComponents, components)
+        sourceMFn = OpenMaya.MFnMesh(dagPathComponents)
+        # list index on set fn
+        sourceVertexId = OpenMaya.MIntArray()
+        while not sourceVertIt.isDone():
+            sourceVertexId.append(sourceVertIt.index())
+            sourceVertIt.next()
+
+        sourceVertIt.reset()
+        logger.debug('source vertex id: %s' % sourceVertexId)
+
+        targetDeformVId = OpenMaya.MIntArray()
+        targetSelList = OpenMaya.MSelectionList()
+        newWeights = OpenMaya.MFloatArray()
+        lastLength = 0  # useful to find valid vertex
+        # closest vertex from target to source
+        # review, optimize
+        while not targetIt.isDone():
+            TVid = targetIt.index()
+            TargetPoint = targetIt.position()
+            closestPoint = OpenMaya.MPoint()
+            ptr = util.asIntPtr()
+            sourceMFn.getClosestPoint(TargetPoint, closestPoint, OpenMaya.MSpace.kObject, ptr)
+            polyId = util.getInt(ptr)
+
+            # get vertices from face id
+            vertexId = OpenMaya.MIntArray()
+            # gives the vertex in non clock direction
+            sourceMFn.getPolygonVertices(polyId, vertexId)
+            vertexLength = vertexId.length()
+            weightList=[]
+            totalArea = 0
+            areaList=[]
+            totalWeight = 0
+            # polygonArea
+            # sourceVertIt.setIndex(polyId)
+            # iterate over the face vertex
+            # check if any vertex is in the list of source vertex
+            # TODO: review calculations, and try to optimize
+            if set(vertexId) & set(sourceVertexId):  # & intersection
+                for i, Vid in enumerate(vertexId):
+                    # check first if any vertex is in the list
+                    # calculate relative weight.
+                    DistPoint = OpenMaya.MPoint()
+                    sourceMFn.getPoint(Vid, DistPoint)  # get weighted vertex position
+                    DistVector = OpenMaya.MVector(closestPoint - DistPoint)
+                    vectorU = OpenMaya.MPoint()  # vectorA
+                    sourceMFn.getPoint(vertexId[i-1], vectorU)
+                    vectorV = OpenMaya.MPoint()  # vertorB
+                    sourceMFn.getPoint(vertexId[(i+1) % vertexLength], vectorV)
+                    # construct barycentricc vectors
+                    # documentation: http://blackpawn.com/texts/pointinpoly/
+                    vectorU = OpenMaya.MVector(vectorU - DistPoint)
+                    vectorV = OpenMaya.MVector(vectorV - DistPoint)
+
+                    # Barycentric coords
+                    u, v = VectorMath.barycentricCoords(vectorU, vectorV, DistVector)
+
+                    areaVector = (vectorU*(1-u) ^ vectorV*(1-v)).length()
+                    totalArea += areaVector
+                    areaList.append(areaVector)
+
+                    # get wheights
+                    if Vid in sourceVertexId:
+                        weightIndex = list(sourceVertexId).index(Vid)  # get the vertex list index, valid for the weight list
+                        sourceWeight = originalWeight[weightIndex]  # get weight value from the list
+                    else:
+                        sourceWeight = 0
+                    weightList.append(sourceWeight)
+
+                    # save valid vertex index. only once.
+                    if not TVid in targetDeformVId:
+                        targetDeformVId.append(TVid)
+                        # save components in a selection list. this way we can add it to our set
+                        targetSelList.add(targetDPath, targetIt.currentItem())
+
+            # now calculate and assign weight value
+            newLength = targetDeformVId.length()
+            if lastLength < newLength:
+                weightTarget = 0
+                for i, area in enumerate(areaList):
+                    weightTarget += (area/totalArea)*weightList[i]
+
+                newWeights.append(weightTarget)
+                lastLength = newLength
+
+            targetIt.next()
+
+        # add to mfnSet
+        fnSet.addMembers(targetSelList)
+        PaintSelList = OpenMaya.MSelectionList()
+        fnSet.getMembers(PaintSelList, False)
+
+        # calculate weights
+        # get from selection list
+        components = OpenMaya.MObject()
+        targetNewWDPath = OpenMaya.MDagPath()
+        for i in range(PaintSelList.length()):
+            # check we have desired dagpath
+            PaintSelList.getDagPath(i, targetNewWDPath, components)
+            if targetNewWDPath.partialPathName() == targetDPath.partialPathName():
+                break
+        print newWeights
+        weightGeometryFilter.setWeight(targetNewWDPath, components, newWeights)
+
+    @staticmethod
+    def getSkinedMeshFromJoint(joint):
+        """
+        Find meshes affected by the joint
+        :param joint (pm or str): joint
+        :return (set): Meshes affected by the joint
+        """
+        # create pm objects from list
+        joint = pm.PyNode(joint) if isinstance(joint, str) else joint
+        # find skin clusters
+        skinClusterLst = set(joint.listConnections(type='skinCluster'))
+
+        meshes = []
+        for skin in skinClusterLst:
+            meshes += skin.getGeometry()
+
+        return set(meshes)
 
 
 def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
@@ -560,104 +1057,6 @@ def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
     return vertexIndexes
 
 
-def smoothDeformerWeights(deformer):
-    """
-    smooth deformer weights.
-    :param deformer(str): Deformer name
-    """
-    mSelection = OpenMaya.MSelectionList()
-    mSelection.add(deformer)
-    # deformer
-    deformerMObject = OpenMaya.MObject()
-    mSelection.getDependNode(0, deformerMObject)
-
-    # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
-    # weight mfn
-    weightGeometryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
-    membersSelList = OpenMaya.MSelectionList()
-    fnSet = OpenMaya.MFnSet(weightGeometryFilter.deformerSet())  # set components affected
-    fnSet.getMembers(membersSelList, False)  # add to selection list
-    dagPathComponents = OpenMaya.MDagPath()
-    components = OpenMaya.MObject()
-    membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
-
-    # get original weights
-    originalWeight = OpenMaya.MFloatArray()
-    weightGeometryFilter.getWeights(0, components, originalWeight)
-
-    # mesh
-    meshVertIt = OpenMaya.MItMeshVertex(dagPathComponents)
-
-
-    newWeights = OpenMaya.MFloatArray()
-    # calculate new weights
-    while not meshVertIt.isDone():
-        # TODO: pure API
-        index = meshVertIt.index()
-        connectedVertices = OpenMaya.MIntArray()
-        meshVertIt.getConnectedVertices(connectedVertices)
-
-        averageValue = originalWeight[index]
-        for vertex in connectedVertices:
-            averageValue += originalWeight[vertex]
-
-        newWeights.append(averageValue/(connectedVertices.length()+1))
-
-        meshVertIt.next()
-
-    # set new weights
-    weightGeometryFilter.setWeight(dagPathComponents, components, newWeights)
-
-
-def setWireDeformer(joints, mesh=None, nameInfo=None, curve=None, weights=None):
-    """
-    Create a curve and wire deformer using joint position as reference
-    :param joints(pm or str): joints
-        mesh(list): list of meshes wire will affect
-    :return: wire deformer and created curve
-    nameInfo: characterName_zone_side
-    """
-    # create pm objects from list
-    joints = [pm.PyNode(joint) if isinstance(joint, str) else joint for joint in joints]
-
-    # get points
-    points = [joint.getTranslation('world') for joint in joints]
-    logger.debug('Wire Deformer curve points: %s' % points)
-
-    # If curve arg is None, create a two point curve
-    if not curve:
-        curve = pm.curve(ep=[points[0], points[-1]], d=2, name=str(nameInfo)+'_wire_curve')
-        # adjust curve points
-        snapCurveToPoints(joints, curve)
-
-    # if not mesh arg, get a random mesh trough the skinCluster
-    if not mesh:
-        mesh = getSkinedMeshFromJoint(joints[0]).pop()
-    else:
-        # check type node
-        if isinstance(mesh, str):
-            mesh = pm.PyNode(mesh)
-        if isinstance(mesh, pm.nodetypes.Transform):
-            mesh = mesh.getShape()
-
-    # get affected vertex
-    affectedVertex = vertexIntoCurveCilinder(str(mesh), str(curve.getShape()), 15, .05, .98)
-
-    # create wire deformer
-    wire, wireCurve = pm.wire(mesh, gw=False, w=curve, dds=(0, 40))
-    logger.debug('wire curve: %s' % wireCurve)
-    pm.percent(wire, mesh, v=0)
-    for index in affectedVertex:
-        pm.percent(wire, mesh.vtx[index], v=1)
-
-    # copyDeformerWeights  ->  command for copy, mirror deformer weights
-    # smooth weights
-    for i in range(4):
-        smoothDeformerWeights(str(wire))
-
-    return wire, curve
-
-
 def transformDriveNurbObjectCV(nurbObject):
     """
     Connect transformations to each Curve Vertex point
@@ -682,173 +1081,6 @@ def transformDriveNurbObjectCV(nurbObject):
         transforms.append(transform)
 
     return transforms
-
-
-def latticeBendDeformer(lattice, controller=None):
-    """
-    connect a bend deformer to a lattice, and the necessary nodes.
-    Controller should have transforms to zero.
-    :param lattice: lattice transform or shape
-    :param controller: Controller for the system
-    :return(list): Transform nodes created in the function:  scaleGrp, referenceBase, referenceController, bendTransform,
-    :return: controllerRoot
-    """
-    # TODO: test with non world aligned lattices
-    # TODO: class?
-    # check data type
-    # check lattice type data
-    if isinstance(lattice, str):
-        lattice = pm.PyNode(lattice)
-    if isinstance(lattice, pm.nodetypes.Transform):
-        lattice = lattice.getShape()
-
-    #check controller type
-    if isinstance(controller, str):
-        controller = pm.PyNode(controller)
-    if not isinstance(controller, pm.nodetypes.Transform):
-        logger.info('controller must be a transform node')
-        return
-
-    latticeTransform = lattice.getTransform()
-    # check lattice visibility, important to query correctly the bbox
-    if not latticeTransform.visibility.get():
-        latticeTransform.visibility.set(True)
-
-    # lattice bbox
-    latticeTransform = lattice.getTransform()
-    latBbox = latticeTransform.boundingBox()
-    logger.debug('LatBboc: %s' % latBbox)
-
-    # Util transform  data
-    centerPoint = (latBbox[0]+latBbox[1])/2
-    logger.debug('Lattice center point: %s, %s' % (centerPoint, type(centerPoint)))
-    # min and max centered points
-    minPoint = pm.datatypes.Point(centerPoint[0], latBbox[0][1], centerPoint[2])
-    maxPoint = pm.datatypes.Point(centerPoint[0], latBbox[1][1], centerPoint[2])
-    latHigh = latBbox[1][1] - latBbox[0][1]
-
-    # reposition controller
-    controller.setTranslation(maxPoint, 'world')
-    # root the controller
-    controllerRoot = createRoots([controller])[0]
-
-    # create bend deformer
-    # review, get some warnings here, maybe cmds is a better option
-    bend, bendTransform = cmds.nonLinear(str(lattice), type='bend', lowBound=-1, curvature=0)
-    bendTransform = pm.PyNode(bendTransform)
-    bendTransform.setTranslation(minPoint, 'world')
-    cmds.setAttr('%s.lowBound' %(bend), 0)
-    cmds.setAttr('%s.highBound' % (bend), 1)
-    # set scale lattice
-    bendTransform.scale.set([latHigh,latHigh,latHigh])
-
-    ## create nodes ##
-    distanceBettween = pm.createNode('distanceBetween')
-    distanceBettween.point2.set([0,0,0])
-    # don't connect y component
-    for axis in ('X', 'Z'):
-        controller.attr('translate%s' % axis).connect(distanceBettween.attr('point1%s' % axis))
-
-    # condition, to avoid vector with length 0
-    condition = pm.createNode('condition')
-    distanceBettween.distance.connect(condition.firstTerm)
-    conditionAxis=['R','B']
-    for i, axis in enumerate(['X','Z']):
-        controller.attr('translate%s' % axis).connect(condition.attr('colorIfFalse%s' % conditionAxis[i]))
-
-    condition.colorIfFalseG.set(0)
-    condition.colorIfTrue.set([0.001, 0, 0])
-
-    # normalizeVector
-    normalize=pm.createNode('vectorProduct')
-    normalize.operation.set(0)
-    normalize.normalizeOutput.set(True)  # normalized
-    condition.outColor.connect(normalize.input1)
-    # find vector z, use cross product
-    crossProduct = pm.createNode('vectorProduct')
-    crossProduct.normalizeOutput.set(True)  # normalize
-    crossProduct.operation.set(2)
-    normalize.output.connect(crossProduct.input1)
-    crossProduct.input2.set([0, 1, 0])
-    # create fourByFour matrix
-    matrix = pm.createNode('fourByFourMatrix')
-    # vector X
-    for i, axis in enumerate(['X', 'Y', 'Z']):
-        normalize.attr('output%s' % axis).connect(matrix.attr('in0%s'% i))
-    # vector Z
-    for i, axis in enumerate(['X', 'Y', 'Z']):
-        crossProduct.attr('output%s' % axis).connect(matrix.attr('in2%s'% i))
-
-    # decompose Matrix
-    decomposeMatrix = pm.createNode('decomposeMatrix')
-    matrix.output.connect(decomposeMatrix.inputMatrix)
-    # connect rotation
-    decomposeMatrix.outputRotate.connect(bendTransform.rotate)
-
-    ## curvature ##
-    decomposeMatrixController = pm.createNode('decomposeMatrix')
-    controller.worldMatrix.connect(decomposeMatrixController.inputMatrix)
-    # transformNodes
-    referenceController = pm.group(empty=True, name='%s_ctr_ref' % str(latticeTransform))
-    pm.xform(referenceController, ws=True, m=pm.xform(controller, q=True, ws=True, m=True))
-    referenceBase = pm.group(empty=True, name='%s_base_ref' % str(latticeTransform))
-    referenceBase.setTranslation(minPoint, 'world')
-    # ref Controller
-    RefControllerDecMatr = pm.createNode('decomposeMatrix')
-    referenceController.worldMatrix.connect(RefControllerDecMatr.inputMatrix)
-    #base
-    refBaseDecMatr = pm.createNode('decomposeMatrix')
-    referenceBase.worldMatrix.connect(refBaseDecMatr.inputMatrix)
-    # firstVector
-    vector1 = pm.createNode('plusMinusAverage')
-    vector1.operation.set(2)  #substract
-    decomposeMatrixController.outputTranslate.connect(vector1.input3D[0])
-    refBaseDecMatr.outputTranslate.connect(vector1.input3D[1])
-    # second vector
-    vector2 = pm.createNode('plusMinusAverage')
-    vector2.operation.set(2)  #substract
-    RefControllerDecMatr.outputTranslate.connect(vector2.input3D[0])
-    refBaseDecMatr.outputTranslate.connect(vector2.input3D[1])
-    # calculate angle
-    angleBetween = pm.createNode('angleBetween')
-    vector1.output3D.connect(angleBetween.vector1)
-    vector2.output3D.connect(angleBetween.vector2)
-    # connect to bend
-    cmds.connectAttr('%s.angle' %(str(angleBetween)), '%s.curvature' % bend)
-
-    ## scale system ##
-    scaleGrp = pm.group(empty=True, name='%s_scale_grp' % str(latticeTransform))
-    scaleGrp.setTranslation(minPoint, 'world')
-    scaleGrp.addChild(latticeTransform)
-    # node connection
-    # distance between controller and base lattice
-    distanceBettween = pm.createNode('distanceBetween')
-    controller.worldMatrix.connect(distanceBettween.inMatrix1)
-    referenceBase.worldMatrix.connect(distanceBettween.inMatrix2)
-    # distance between controller REFERENCE and base lattice
-    distanceReference = pm.createNode('distanceBetween')
-    referenceController.worldMatrix.connect(distanceReference.inMatrix1)
-    referenceBase.worldMatrix.connect(distanceReference.inMatrix2)
-    # divide by the original length
-    multiplyDivide = pm.createNode('multiplyDivide')
-    multiplyDivide.operation.set(2)  # set to divide
-    # connect distances
-    distanceBettween.distance.connect(multiplyDivide.input1X)
-    distanceReference.distance.connect(multiplyDivide.input2X)
-    # get inverse
-    inverse = pm.createNode('multiplyDivide')
-    inverse.operation.set(2)  # divide
-    inverse.input1X.set(1)
-    multiplyDivide.outputX.connect(inverse.input2X)
-    # connect result to scale group
-    multiplyDivide.outputX.connect(scaleGrp.scaleY)
-    for axis in ('X', 'Z'):
-        inverse.outputX.connect(scaleGrp.attr('scale%s' % axis))
-
-    # lock and hide attr
-    lockAndHideAttr(controller, False, True, True)
-
-    return [scaleGrp, referenceBase, referenceController, bendTransform, controllerRoot]
 
 
 def jointChain(length=None, joints=10, curve=None):
@@ -1058,14 +1290,174 @@ def squareController(heigh, width, normalAxis= 'x', color=None):
 
     return sqrController
 
+class MeshOp():
+    """
+    Class with static methods to manipulate mesh
+    """
+    @staticmethod
+    def barycentricSym(mesh, axis='x'):
+        """
+        Return a list with the vertex and their weight with symetrize vertex.
+        all in object space
+        [Vid,[Vid, W], [Vid, W] ... ]
+        :param mesh(str):
+        :return:
+        """
+        # get selection list
+        mSel = OpenMaya.MSelectionList()
+        mSel.add(str(mesh))
+
+        # get depend node
+        mDagPath = OpenMaya.MDagPath()
+        mSel.getDagPath(0, mDagPath)
+
+        if mDagPath.apiType() == OpenMaya.MFn.kTransform:
+            # if we get the transform, descent to the shape
+            mDagPath.extendToShape()
+        meshObj = mDagPath.node()
+
+        # mfnMesh
+        mFnMesh = OpenMaya.MFnMesh(mDagPath)
+        vertexCount = mFnMesh.numVertices()
+        #itterator
+        mItMesh = OpenMaya.MItMeshVertex(mDagPath)
+
+        # get all points
+        vPoints = OpenMaya.MFloatPointArray()
+        mFnMesh.getPoints(vPoints)
+
+        # util
+        util = OpenMaya.MScriptUtil()
+
+        # build mesh intersection
+        meshPt = OpenMaya.MPointOnMesh()
+        meshIntersector = OpenMaya.MMeshIntersector()
+        meshIntersector.create(meshObj, OpenMaya.MMatrix.identity)
+
+        # to save info
+        arrayWeights = OpenMaya.MPointArray(vertexCount)  # groups of 3
+        arrayIndex = OpenMaya.MIntArray(vertexCount*3)  # every 3 is a new vertex
+        # getPolygonTriangleVertices(polygonId, triangleId, vertexList[3](mintArray))
+        # return (u >= 0) && (v >= 0) && (u + v < 1) point in the try
+
+        # the fastest way to iterate over a mesh
+        while not mItMesh.isDone():
+            vertID = mItMesh.index()
+            vertInvPos = mItMesh.position()
+            # inverVert.x to find the respective vertex
+            setattr(vertInvPos, axis, - getattr(vertInvPos, axis))
+
+            # use intersection to get closest info
+            meshIntersector.getClosestPoint(vertInvPos, meshPt, 0.1)
+            # get closes point
+            closestPoint = meshPt.getPoint()
+            faceID = meshPt.faceIndex()
+            triID = meshPt.triangleIndex()
+
+            # get vertex of the triangle
+            ptr = util.asIntPtr()
+            mFnMesh.getPolygonTriangleVertices(faceID, triID, ptr)
+            # get ptr info
+            vID = [util.getIntArrayItem(ptr, i) for i in range(3)]
+            uvL = []
+            # get all barycentrics
+            for i in range(3):
+                uvL.append(VectorMath.barycentricCoords(vPoints[vID[(i+1) % 3]] - vPoints[vID[i]],
+                                            vPoints[vID[(i + 2) % 3]] - vPoints[vID[i]],
+                                            closestPoint - vPoints[vID[i]]))
+            # save here the total area
+            totalWeight = 0.0
+            weightsList = []
+            for i in range(3):
+                # ub(c-b)+(b-a)"vB" - vA  // vc(b-c) + (v-a)"vC" - vA
+                vA = OpenMaya.MVector(closestPoint - vPoints[vID[i]])  # vector for reference
+                vB = (vPoints[vID[(i+2) % 3]] - (vPoints[vID[(i+1) % 3]])) * uvL[(i+1) % 3][0] + (vPoints[vID[(i+1)%3]] - vPoints[vID[i]])
+                vB = OpenMaya.MVector(vB) - vA
+                vC = (vPoints[vID[(i+1) % 3]] - (vPoints[vID[(i+2) % 3]])) * uvL[(i+2) % 3][1] + (vPoints[vID[(i+2)%3]] - vPoints[vID[i]])
+                vC = OpenMaya.MVector(vC) - vA
+
+                weight = (vB ^ vC).length()/2
+                totalWeight += weight
+                weightsList.append(weight)
+
+            # normalize weights
+            for i in range(3):
+                weightsList[i] = weightsList[i] / totalWeight
+
+            # save data
+            # vertex IDs
+            for i in range(3):
+                arrayIndex[vertID*3+i] = vID[i]
+
+            weightPoint = OpenMaya.MPoint(weightsList[0], weightsList[1], weightsList[2])
+            arrayWeights.set(weightPoint, vertID)
+
+            mItMesh.next()
+
+        return arrayWeights, arrayIndex
+
 
 ########################
 #Dependency graph utils#
 ########################
-class DependencyGraphUtils():
+class DGUtils():
     """
     Dependency graph utils, this class exists for organization porpoises
     """
+    @staticmethod
+    def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
+        """
+        create circuitry nodes to blend ik value to fk value
+        Args:
+            ikNode(pm.dependNode): node with stretch ik values
+            fkNode(pm.dependNode): node with stretch Fk values
+            blendAttr: attribute that will direct the blend
+            nameInfo: str  with name info p.e('akona_lowerLeg_leg')
+            args(pm.attributes): attributes to connect with the blend. pe. mainJoint.translateX (pm object)
+        Return:
+            last node with the blend info
+        """
+        # TODO: name scalable
+        ikOutputType = 'outputX' if isinstance(ikNode, pm.nodetypes.MultiplyDivide) else 'distance' if isinstance(
+            ikNode, pm.nodetypes.DistanceBetween) else 'output1D'
+        fKoutputType = 'outputX' if isinstance(fkNode, pm.nodetypes.MultiplyDivide) else 'distance' if isinstance(
+            fkNode, pm.nodetypes.DistanceBetween) else 'output1D'
+
+        plusMinusBase = pm.createNode('plusMinusAverage', name='%s_blending_plusMinusAverage' % nameInfo)
+        plusMinusBase.operation.set(2)  # substract
+        ikNode.attr(ikOutputType).connect(plusMinusBase.input1D[0])
+        fkNode.attr(fKoutputType).connect(plusMinusBase.input1D[1])
+        # multiply
+        multiplyNode = pm.createNode('multiplyDivide', name='%s_blending_multiplyDivide' % nameInfo)
+        blendAttr.connect(multiplyNode.input1X)
+        plusMinusBase.output1D.connect(multiplyNode.input2X)
+        # plus Fk
+        plusIkFkBlend = pm.createNode('plusMinusAverage', name='%s_blendingPlusFk_plusMinusAverage' % nameInfo)
+        multiplyNode.outputX.connect(plusIkFkBlend.input1D[0])
+        fkNode.attr(fKoutputType).connect(plusIkFkBlend.input1D[1])
+
+        # connect to main attributes
+        for arg in args:
+            plusIkFkBlend.output1D.connect(arg)
+
+        return plusIkFkBlend
+
+
+    @staticmethod
+    def connectAttributes(driver, driven, attributes, axis):
+        """
+        connect the attributes of the given objects
+        Args:
+            driver: source of the connection
+            driven: destiny of the connection
+            attributes: attributes to connect p.e scale, translate
+            axis: axis of the attribute p.e ['X', 'Y', 'Z'] or XYZ
+        """
+        for attribute in attributes:
+            for axi in axis:
+                driver.attr('%s%s' % (attribute, axi)).connect(driven.attr('%s%s' % (attribute, axi)))
+
+
     @staticmethod
     def treeTracker(start, nodeType, inputs=True, maxNodes=0):
         """
@@ -1476,12 +1868,39 @@ class VectorMath_Nodes():
             return output[0]
 
 
-class VectorOperations():
+class VectorMath():
     """
     class based on common vector operations.
     This class exists for organize porpoises.
     No nodes operations
     """
+
+    @staticmethod
+    def barycentricCoords(vectorU, vectorV, vectorBar):
+        """
+        given two vectors, return the barycentric coords of the barVector
+        :param vectorA (mVector):
+        :param vectorB (mVector):
+        :param point (mPoint):
+        :return:
+        """
+        if not isinstance(vectorU, OpenMaya.MVector):
+            vectorU = OpenMaya.MVector(vectorU)
+
+        if not isinstance(vectorV, OpenMaya.MVector):
+            vectorV = OpenMaya.MVector(vectorV)
+
+        if not isinstance(vectorBar, OpenMaya.MVector):
+            vectorBar = OpenMaya.MVector(vectorBar)
+
+        # denominator
+        denom = ((vectorU * vectorU) * (vectorV * vectorV) - (vectorU * vectorV) * (vectorV * vectorU))
+        # u and V
+        u = ((vectorV * vectorV) * (vectorBar * vectorU) - (vectorV * vectorU) * (vectorBar * vectorV)) / denom
+        v = ((vectorU * vectorU) * (vectorBar * vectorV) - (vectorU * vectorV) * (vectorBar * vectorU)) / denom
+
+        return u, v
+
 
     @staticmethod
     def orientToPlane(matrix, plane=None, respectAxis=None):
