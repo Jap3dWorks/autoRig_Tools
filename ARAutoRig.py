@@ -1589,7 +1589,7 @@ class AutoRig(object):
     def PSSkirt_auto(self, zone, drivers, parent, offset=0.15, falloff=1, range=75):
         """
         PoseSpace skirt
-        TODO: less vector points, and more global
+        TODO: Optimize -> maybe more object matrix with no necessity of mult inv matrix
         TODO: rename correctly
         :param zone:
         :param side:
@@ -1601,8 +1601,8 @@ class AutoRig(object):
         :return:
         """
         # simplify names from modules
-        VM_N = ARC.VectorMath_Nodes
-        DGU = ARC.DGUtils
+        VM_N = ARC.VectorMath_Nodes  # vector math for nodes module
+        DGU = ARC.DGUtils  # dependency graph utils
 
         skirtJoints = [point for point in pm.ls() if re.match('^%s.*(%s).*joint$' % (self.chName, zone), str(point))]
         # arrange lists by hierarchy
@@ -1747,15 +1747,19 @@ class AutoRig(object):
 
             noTwistMatrix = VM_N.build4by4Matrix(driverVector, blendY.output, blendZ.output)
 
+            # ref group
             if autoGrpTotal_list:  # fixme
-                # if a previous system exists, get its inverse matrix, to avoid paren transform problems
-                mulMatrix = VM_N.multMatrix(noTwistMatrix, lastNoTwistRef_grp.worldInverseMatrix[0])
-                noTwistMatrix = mulMatrix
-
-                refNoOrientMatrix = VM_N.multMatrix(noTwistRef_grp.worldMatrix[0],lastNoTwistRef_grp.worldInverseMatrix[0])
-
+                mulMatrixInv = lastNoTwistRef_grp.worldInverseMatrix[0]
+                lastNoTwistRef_grpInv = lastNoTwistRef_grp.worldInverseMatrix[0]
             else:
-                refNoOrientMatrix = noTwistRef_grp.worldMatrix[0]
+                mulMatrixInv = parent.worldInverseMatrix[0]
+                lastNoTwistRef_grpInv = parent.worldInverseMatrix[0]
+
+            # if a previous system exists, get its inverse matrix, to avoid paren transform problems
+            mulMatrix = VM_N.multMatrix(noTwistMatrix, mulMatrixInv)
+            noTwistMatrix = mulMatrix
+            # ref no twist orient matrix inv
+            refNoOrientMatrix = VM_N.multMatrix(noTwistRef_grp.worldMatrix[0], lastNoTwistRef_grpInv)
 
 
             noTwistDecMat = pm.createNode('decomposeMatrix')
@@ -1839,7 +1843,6 @@ class AutoRig(object):
                 dotCtrBlend.output.connect(dotClamp.inputR)
                 dotClamp.max.set([1, 1, 1])
 
-
                 # blend orientations
                 """
                 orientationBlend = pm.createNode('blendColors')
@@ -1864,7 +1867,6 @@ class AutoRig(object):
                 decomposeMat = pm.createNode('decomposeMatrix')
                 blendMatrix.matrixSum.connect(decomposeMat.inputMatrix)
                 decomposeMat.outputRotate.connect(autoGrp.rotate)
-
 
                 # connect to auto grp
                 #orientationBlend.output.connect(autoGrp.rotate)

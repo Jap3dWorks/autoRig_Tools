@@ -126,7 +126,7 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
         # connect to joint
         # with pole Vector snap
         if poleVector:
-            ikStretchOutput = DGUtils.attrBlending(distanceBetweenPoleList[i], multiplyTranslate, nodeAttr.attr(snapPoleAttrStr), nameInfo, joint.translateX)
+            ikStretchOutput = attrBlending(distanceBetweenPoleList[i], multiplyTranslate, nodeAttr.attr(snapPoleAttrStr), nameInfo, joint.translateX)
 
             multiplyTranslate = ikStretchOutput
         else:
@@ -163,12 +163,12 @@ def stretchIkFkSetup(fkObjList, fkDistances, nodeAttr, ikObjList, ikDistance, ik
         fkCVNode = conserveVolumeAnimNode(conserveVolumeAnimCurve, i, fkCVScaleFactorInvert, fkConserveVolumeScaleFactor, nameInfo)
         # main blending
         # connect to joint
-        DGUtils.attrBlending(ikCVNode, fkCVNode, nodeAttr.attr('ikFk'), '%s_conserveVolume' % nameInfo, CVJoint.scaleY, CVJoint.scaleZ)
+        attrBlending(ikCVNode, fkCVNode, nodeAttr.attr('ikFk'), '%s_conserveVolume' % nameInfo, CVJoint.scaleY, CVJoint.scaleZ)
 
     # to main joints formula: A+(B-A)*blend for joint, add twistBones, and stretch too
     for i, fkOut in enumerate(outputFk):
         # blending
-        plusMinusToMain = DGUtils.attrBlending(outputIk[i], fkOut, nodeAttr.attr('ikFk'), '%s_stretch' % nameInfo, mainJoints[i].translateX)
+        plusMinusToMain = attrBlending(outputIk[i], fkOut, nodeAttr.attr('ikFk'), '%s_stretch' % nameInfo, mainJoints[i].translateX)
         # stretch to twist joints
 
         if twsitMainJoints:
@@ -435,3 +435,42 @@ def twistJointConnect(mainJointList, twistList, joints, twistSyncJoints):
                 twistJnt.rename(str(skinJoint).replace('joint', 'main'))
                 pm.orientConstraint(twistJnt, skinJoint, maintainOffset=False)
                 pm.pointConstraint(twistJnt, skinJoint, maintainOffset=False)
+
+
+def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
+    """
+    TODO: pass this func to ARHelper
+    create circuitry nodes to blend ik value to fk value
+    Args:
+        ikNode(pm.dependNode): node with stretch ik values
+        fkNode(pm.dependNode): node with stretch Fk values
+        blendAttr: attribute that will direct the blend
+        nameInfo: str  with name info p.e('akona_lowerLeg_leg')
+        args(pm.attributes): attributes to connect with the blend. pe. mainJoint.translateX (pm object)
+    Return:
+        last node with the blend info
+    """
+    # TODO: name scalable
+    ikOutputType = 'outputX' if isinstance(ikNode, pm.nodetypes.MultiplyDivide) else 'distance' if isinstance(
+        ikNode, pm.nodetypes.DistanceBetween) else 'output1D'
+    fKoutputType = 'outputX' if isinstance(fkNode, pm.nodetypes.MultiplyDivide) else 'distance' if isinstance(
+        fkNode, pm.nodetypes.DistanceBetween) else 'output1D'
+
+    plusMinusBase = pm.createNode('plusMinusAverage', name='%s_blending_plusMinusAverage' % nameInfo)
+    plusMinusBase.operation.set(2)  # substract
+    ikNode.attr(ikOutputType).connect(plusMinusBase.input1D[0])
+    fkNode.attr(fKoutputType).connect(plusMinusBase.input1D[1])
+    # multiply
+    multiplyNode = pm.createNode('multiplyDivide', name='%s_blending_multiplyDivide' % nameInfo)
+    blendAttr.connect(multiplyNode.input1X)
+    plusMinusBase.output1D.connect(multiplyNode.input2X)
+    # plus Fk
+    plusIkFkBlend = pm.createNode('plusMinusAverage', name='%s_blendingPlusFk_plusMinusAverage' % nameInfo)
+    multiplyNode.outputX.connect(plusIkFkBlend.input1D[0])
+    fkNode.attr(fKoutputType).connect(plusIkFkBlend.input1D[1])
+
+    # connect to main attributes
+    for arg in args:
+        plusIkFkBlend.output1D.connect(arg)
+
+    return plusIkFkBlend

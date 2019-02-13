@@ -1405,42 +1405,61 @@ class DGUtils():
     Dependency graph utils, this class exists for organization porpoises
     """
     @staticmethod
-    def attrBlending(ikNode, fkNode, blendAttr, nameInfo, *args):
+    def floatCondition(f1, f2, condition, f1Val=None, f2Val=None):
         """
-        create circuitry nodes to blend ik value to fk value
-        Args:
-            ikNode(pm.dependNode): node with stretch ik values
-            fkNode(pm.dependNode): node with stretch Fk values
-            blendAttr: attribute that will direct the blend
-            nameInfo: str  with name info p.e('akona_lowerLeg_leg')
-            args(pm.attributes): attributes to connect with the blend. pe. mainJoint.translateX (pm object)
-        Return:
-            last node with the blend info
+        :param f1(attr or float): first term
+        :param f2 (attr or float): second term
+        :param condition (int): condition type: 0. ==   1. !=
+                                                2. <    3. >
+                                                4. <=   5. >=
+
+        :param f1Val, f2Val (float): alternative values for the float condition node
+        :return:
         """
-        # TODO: name scalable
-        ikOutputType = 'outputX' if isinstance(ikNode, pm.nodetypes.MultiplyDivide) else 'distance' if isinstance(
-            ikNode, pm.nodetypes.DistanceBetween) else 'output1D'
-        fKoutputType = 'outputX' if isinstance(fkNode, pm.nodetypes.MultiplyDivide) else 'distance' if isinstance(
-            fkNode, pm.nodetypes.DistanceBetween) else 'output1D'
+        ## check types ##
+        floats = [f1, f2]
+        for i in range(len(floats)):
+            if isinstance(floats[i], str):
+                floats[i] = pm.PyNode(floats[i])
+            elif isinstance(floats[i], int):
+                floats[i] = float(floats[i])
 
-        plusMinusBase = pm.createNode('plusMinusAverage', name='%s_blending_plusMinusAverage' % nameInfo)
-        plusMinusBase.operation.set(2)  # substract
-        ikNode.attr(ikOutputType).connect(plusMinusBase.input1D[0])
-        fkNode.attr(fKoutputType).connect(plusMinusBase.input1D[1])
-        # multiply
-        multiplyNode = pm.createNode('multiplyDivide', name='%s_blending_multiplyDivide' % nameInfo)
-        blendAttr.connect(multiplyNode.input1X)
-        plusMinusBase.output1D.connect(multiplyNode.input2X)
-        # plus Fk
-        plusIkFkBlend = pm.createNode('plusMinusAverage', name='%s_blendingPlusFk_plusMinusAverage' % nameInfo)
-        multiplyNode.outputX.connect(plusIkFkBlend.input1D[0])
-        fkNode.attr(fKoutputType).connect(plusIkFkBlend.input1D[1])
+        fVal = [f1Val, f2Val]
+        for i in range(len(fVal)):
+            if isinstance(fVal[i], str):
+                fVal[i] = pm.PyNode(fVal[i])
+            elif isinstance(fVal[i], int):
+                fVal[i] = float(fVal[i])
 
-        # connect to main attributes
-        for arg in args:
-            plusIkFkBlend.output1D.connect(arg)
+        ## func ##
+        # float 1 / floatA
+        nAttr = "AB"
+        floatLogic = pm.createNode("floatLogic")
+        for i, f in enumerate(floats):
+            if isinstance(f, float):
+                floatLogic.attr("float%s" % nAttr[i]).set(f)
+            else:
+                f.connect(floatLogic.attr("float%s" % nAttr[i]))
 
-        return plusIkFkBlend
+        # set condition
+        floatLogic.operation.set(condition)
+
+        ## create float condition node ##
+        floatCondition = pm.createNode("floatCondition")
+        floatLogic.outBool.connect(floatCondition.condition)
+
+        for i in range(len(nAttr)):
+            if fVal[i]:
+                if isinstance(fVal[i], float):
+                    floatCondition.attr("float%s" % nAttr[i]).set(fVal[i])
+                else:
+                    fVal[i].connect(floatCondition.attr("float%s" % nAttr[i]))
+
+            else:
+                floatLogic.attr("float%s" % nAttr[i]).connect(floatCondition.attr("float%s" % nAttr[i]))
+
+
+        return floatCondition.outFloat
 
 
     @staticmethod
@@ -1465,6 +1484,7 @@ class DGUtils():
          desired nodetypes.
          :param start (str or pm):
          :param nodeType (str):
+         :param inputs (bool): true inputs, false outputs
          :param maxNodes: maximum of found nodes, 0 equal to no maximum
         """
         if isinstance(start, str):
@@ -1516,8 +1536,7 @@ def checkVectorType(vector):
     :param vector:
     :return:
     """
-    # check type
-    # vector
+    # check type # vector
     if isinstance(vector, list) or isinstance(vector, tuple):
         vector = pm.datatypes.Vector(vector[0], vector[1], vector[2])
 
@@ -1551,6 +1570,45 @@ class VectorMath_Nodes():
     class based on common Node vector operations.
     This class exists for organize porpoises.
     """
+    @staticmethod
+    def quatToAxisAngle(quat):
+        """
+        Convert a quaternion attr in a angle and a vector
+        :param quat (str or pm): plug attr with the quaternion
+        :return([pm, pm]): [anglePlug, vectorPlug]
+        """
+        # check types
+        if isinstance(quat, str):
+            quat = pm.PyNode(quat)
+
+        QTAA = pm.createNode("quatToAxisAngle")
+        quat.connect(QTAA.inputQuat)
+
+        return [QTAA.outputAngle, QTAA.outputAxis]
+
+
+    @staticmethod
+    def decomposeMatrix(matrix):
+        """
+        Decompose a matrix into:
+            .quaternion.
+            .rotation.
+            .scale.
+            .shear.
+            .translate
+        :param matrix (str or pm): attribute with the matrix
+        :return: in order: quaternion, rotation, scale, shear, translate
+        """
+        # check types
+        if isinstance(matrix, str):
+            matrix = pm.PyNode(matrix)
+
+        DM = pm.createNode("decomposeMatrix")
+        matrix.connect(DM.inputMatrix)
+
+        return DM.outputQuat, DM.outputRotate, DM.outputScale, DM.outputShear, DM.outputTranslate
+
+
     @staticmethod
     def multMatrix(*args):
         """
