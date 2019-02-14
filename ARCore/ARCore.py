@@ -1400,10 +1400,78 @@ class MeshOp():
 ########################
 #Dependency graph utils#
 ########################
-class DGUtils():
+class DGUtils:
     """
     Dependency graph utils, this class exists for organization porpoises
     """
+
+    @staticmethod
+    def colorLogic(colorA, colorB, condition):
+        """
+        create a color logic node
+        :param condition: condition type: 0. ==   1. !=
+                                        2. <    3. >
+                                        4. <=   5. >=
+        :return:
+        """
+        ## check types ##
+        colors = [colorA, colorB]
+        for i in range(len(colors)):
+            if isinstance(colors[i], str):
+                colors[i] = pm.PyNode(colors[i])
+
+        nAttr = "AB"
+        colorLogic = pm.createNode("colorLogic")
+        colorLogic.operation.set(condition)
+        for i in range(len(colors)):
+            if isinstance(colors[i], list):
+                colorLogic.attr("color%s" % nAttr[i]).set(colors[i])
+            else:
+                colors[i].connect(colorLogic.attr("color%s" % nAttr[i]))
+
+        colorLogic = colorLogic.outBool
+
+        return colorLogic
+
+
+
+    @staticmethod
+    def colorCondition(colorA=(0,0,0), colorB=(0,0,0), condition=0, colorTrue=None, colorFalse=None, colorLogic=None):
+        """
+        Create a color condition, compare colors.
+        :param colorA: logic first arg
+        :param colorB: logic second arg
+        :param condition: condition type: 0. ==   1. !=
+                                          2. <    3. >
+                                          4. <=   5. >=
+        :param colorTrue colorfalse: alternative values for the float condition node, if none use colorA or colorB
+        :return:
+        """
+        ## check types ##
+        colorsBool = [colorTrue, colorFalse]
+        for i in range(len(colorsBool)):
+            if isinstance(colorsBool[i], str):
+                colorsBool[i] = pm.PyNode(colorsBool[i])
+
+        ## func ##
+        nAttr = "AB"
+        if colorLogic == None:
+            colorLogic = DGUtils.colorLogic(colorA, colorB, condition)
+
+        # create condition node
+        colorCondition = pm.createNode("colorCondition")
+        colorLogic.connect(colorCondition.condition)
+
+        for i in range(len(colorsBool)):
+            attrConect = colorsBool[i] if colorsBool[i]  != None else colorLogic.attr("color%s" % nAttr[i])
+            if isinstance(attrConect, list):
+                colorCondition.attr("color%s" % nAttr[i]).set(attrConect)
+            else:
+                attrConect.connect(colorCondition.attr("color%s" % nAttr[i]))
+
+        return colorCondition.outColor
+
+
     @staticmethod
     def floatCondition(f1, f2, condition, f1Val=None, f2Val=None):
         """
@@ -1435,29 +1503,26 @@ class DGUtils():
         # float 1 / floatA
         nAttr = "AB"
         floatLogic = pm.createNode("floatLogic")
+        # set condition
+        floatLogic.operation.set(condition)
+
         for i, f in enumerate(floats):
             if isinstance(f, float):
                 floatLogic.attr("float%s" % nAttr[i]).set(f)
             else:
                 f.connect(floatLogic.attr("float%s" % nAttr[i]))
 
-        # set condition
-        floatLogic.operation.set(condition)
-
         ## create float condition node ##
         floatCondition = pm.createNode("floatCondition")
         floatLogic.outBool.connect(floatCondition.condition)
 
+        print fVal
         for i in range(len(nAttr)):
-            if fVal[i]:
-                if isinstance(fVal[i], float):
-                    floatCondition.attr("float%s" % nAttr[i]).set(fVal[i])
-                else:
-                    fVal[i].connect(floatCondition.attr("float%s" % nAttr[i]))
-
+            connectAttr = fVal[i] if fVal[i] != None else floatLogic.attr("float%s" % nAttr[i])
+            if isinstance(connectAttr, float):
+                floatCondition.attr("float%s" % nAttr[i]).set(connectAttr)
             else:
-                floatLogic.attr("float%s" % nAttr[i]).connect(floatCondition.attr("float%s" % nAttr[i]))
-
+                connectAttr.connect(floatCondition.attr("float%s" % nAttr[i]))
 
         return floatCondition.outFloat
 
@@ -1571,6 +1636,31 @@ class VectorMath_Nodes():
     This class exists for organize porpoises.
     """
     @staticmethod
+    def multiplyDivive(value1, value2, operation):
+
+        # check types
+        values = [value1, value2]
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+
+        axis = "XYZ"
+        multiplyDivide = pm.createNode("multiplyDivide")
+        multiplyDivide.operation.set(operation)
+        for i in range(len(values)):
+            if isinstance(values[i], list):
+                multiplyDivide.attr("input%s" % str(i+1)).set(values[i])
+                # todo: accept list of attributes
+
+            else:
+                if values[i].type() == "double3" or values[i].type() == "float3":
+                    values[i].connect(multiplyDivide.attr("input%s" % str(i+1)))
+                else:
+                    values[i].connect(multiplyDivide.attr("input%sX" % str(i+1)))
+
+        return multiplyDivide.output
+
+    @staticmethod
     def quatToAxisAngle(quat):
         """
         Convert a quaternion attr in a angle and a vector
@@ -1591,11 +1681,11 @@ class VectorMath_Nodes():
     def decomposeMatrix(matrix):
         """
         Decompose a matrix into:
-            .quaternion.
-            .rotation.
-            .scale.
-            .shear.
-            .translate
+            0. quaternion.
+            1. rotation.
+            2. scale.
+            3. shear.
+            4. translate
         :param matrix (str or pm): attribute with the matrix
         :return: in order: quaternion, rotation, scale, shear, translate
         """
@@ -1817,10 +1907,19 @@ class VectorMath_Nodes():
 
         # if normalized, return the vector normalized
         if normalized:
+            logic1=DGUtils.colorLogic(substractVector.output3D, [0.01,0.01,0.01], 5)
+            logic2=DGUtils.colorLogic(substractVector.output3D, [-0.01,-0.01,-0.01], 4)
+            addLogic=pm.createNode("addDoubleLinear")
+            logic1.connect(addLogic.input1)
+            logic2.connect(addLogic.input2)
+
+            #logicMult=VectorMath_Nodes.multiplyDivive(logic1, logic2, 1)
+            nonZero = DGUtils.colorCondition(None, None, None, substractVector.output3D,
+                                             [0.001, 0.001, 0.001], addLogic.output)
             normalizeVector = pm.createNode('vectorProduct')
             normalizeVector.operation.set(0)  # no operation
             normalizeVector.normalizeOutput.set(True)
-            substractVector.output3D.connect(normalizeVector.input1)
+            nonZero.connect(normalizeVector.input1)
             return normalizeVector.output
 
         return substractVector.output3D
