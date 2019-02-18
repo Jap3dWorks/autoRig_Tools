@@ -12,3 +12,5 @@ ARTools/ARUtils\.pyc
 *.pyc
 
 \.idea/workspace\.xml
+
+\.idea/
