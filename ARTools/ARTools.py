@@ -602,7 +602,9 @@ class PickerTools(object):
 
         for sel in selection[1:]:
             selShape = cmds.listRelatives(sel, s=True)[0]
-            print selShape
+            print selShape + " RGB"
+            cmds.setAttr('%s.overrideEnabled' % selShape, True)
+            cmds.setAttr('%s.overrideRGBColors' % selShape, 1)
             cmds.setAttr('%s.overrideColorRGB' % selShape, *color)
 
     # buttons dictionary
@@ -649,7 +651,7 @@ class PickerTools(object):
 #########################
 class MirrorControllers(object):
     """
-    Tools for shapes modeling
+    Tools for shapes modeling with controllers.
     """
     def __init__(self, axis=(-1,1,1)):
         """

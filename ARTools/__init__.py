@@ -7,3 +7,8 @@ picker_UI: UI picker for a ended Rig
 import ARTools
 import ARUtils
 import ARpicker_UI
+
+## reloads ##
+reload(ARTools)
+reload(ARUtils)
+reload(ARpicker_UI)
