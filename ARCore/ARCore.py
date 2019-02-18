@@ -24,6 +24,19 @@ def getCurrentPath():
     return os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
 
+### to mel code ###
+def toMelCode(code):
+    """
+    Convert a python code to be launched from mel
+    :param code:
+    :return:
+    """
+    code = code.replace("\"", "'")
+    codesplit = code.split('\n')
+    melCode = 'python("' + '\\n"+\n"'.join(codesplit) + '");'
+    return melCode
+
+
 def createRoots(listObjects, suffix='root'):
     """
     Create root on elements, respecting their present hierarchy.
@@ -444,6 +457,14 @@ class DeformerOp:
             self._symetryWeights = None
             self._symetryID = None
 
+        def shrinkWeight(self):
+            """
+            shrink the vertex weight values
+            :return:
+            """
+            for i in range(self._BSWeights.length()):
+                self._BSWeights[i] = self._BSWeights[i] * self._BSWeights[i]
+
 
         def inverValues(self):
             """
@@ -460,7 +481,9 @@ class DeformerOp:
             :param mesh: Base mesh to set the symmetry
             :param axis:
             """
+            print "__StartSymetry__"
             self._symetryWeights, self._symetryID = MeshOp.barycentricSym(mesh, axis)
+            print "__EndSymetry__"
 
 
         def mirrorWeights(self):
@@ -1326,21 +1349,22 @@ class MeshOp():
         vPoints = OpenMaya.MFloatPointArray()
         mFnMesh.getPoints(vPoints)
 
-        # util
-        util = OpenMaya.MScriptUtil()
-
         # build mesh intersection
         meshPt = OpenMaya.MPointOnMesh()
         meshIntersector = OpenMaya.MMeshIntersector()
         meshIntersector.create(meshObj, OpenMaya.MMatrix.identity)
 
         # to save info
+        # change to python types
         arrayWeights = OpenMaya.MPointArray(vertexCount)  # groups of 3
         arrayIndex = OpenMaya.MIntArray(vertexCount*3)  # every 3 is a new vertex
+        #arrayWeights=[]
+        #arrayIndex=[]
         # getPolygonTriangleVertices(polygonId, triangleId, vertexList[3](mintArray))
         # return (u >= 0) && (v >= 0) && (u + v < 1) point in the try
 
         # the fastest way to iterate over a mesh
+        #it = 0
         while not mItMesh.isDone():
             vertID = mItMesh.index()
             vertInvPos = mItMesh.position()
@@ -1355,16 +1379,21 @@ class MeshOp():
             triID = meshPt.triangleIndex()
 
             # get vertex of the triangle
+            # util
+            # seems declaring here the util with an intarray of 3 elments works better
+            util = OpenMaya.MScriptUtil(OpenMaya.MIntArray(3))  # storage for 3 elements
             ptr = util.asIntPtr()
             mFnMesh.getPolygonTriangleVertices(faceID, triID, ptr)
             # get ptr info
             vID = [util.getIntArrayItem(ptr, i) for i in range(3)]
             uvL = []
+
             # get all barycentrics
             for i in range(3):
                 uvL.append(VectorMath.barycentricCoords(vPoints[vID[(i+1) % 3]] - vPoints[vID[i]],
                                             vPoints[vID[(i + 2) % 3]] - vPoints[vID[i]],
                                             closestPoint - vPoints[vID[i]]))
+
             # save here the total area
             totalWeight = 0.0
             weightsList = []
@@ -1388,9 +1417,10 @@ class MeshOp():
             # vertex IDs
             for i in range(3):
                 arrayIndex[vertID*3+i] = vID[i]
+                #arrayIndex.append(vID[i])
 
-            weightPoint = OpenMaya.MPoint(weightsList[0], weightsList[1], weightsList[2])
-            arrayWeights.set(weightPoint, vertID)
+            arrayWeights.set(OpenMaya.MPoint(weightsList[0], weightsList[1], weightsList[2]), vertID)
+            #arrayWeights.append([weightsList[0], weightsList[1], weightsList[2]])
 
             mItMesh.next()
 
