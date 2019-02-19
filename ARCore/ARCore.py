@@ -1434,13 +1434,12 @@ class DGUtils:
     """
     Dependency graph utils, this class exists for organization porpoises
     """
-
     @staticmethod
     def floatLogic(floatA, floatB, condition):
         """
         create a float logic node
         :param condition: condition type: 0. ==   1. !=
-                                        2. <    3. >
+                                         2. <    3. >
                                         4. <=   5. >=
         :return:
         """
@@ -1491,9 +1490,8 @@ class DGUtils:
         return colorLogic
 
 
-
     @staticmethod
-    def colorCondition(colorA=(0,0,0), colorB=(0,0,0), condition=0, colorTrue=None, colorFalse=None, colorLogic=None):
+    def colorCondition(colorA=(0,0,0), colorB=(0,0,0), condition=0, colorTrue=None, colorFalse=None):
         """
         Create a color condition, compare colors.
         :param colorA: logic first arg
@@ -1512,8 +1510,10 @@ class DGUtils:
 
         ## func ##
         nAttr = "AB"
-        if colorLogic == None:
+        if isinstance(condition, int) or isinstance(condition, float):
             colorLogic = DGUtils.colorLogic(colorA, colorB, condition)
+        else:
+            colorLogic = condition
 
         # create condition node
         colorCondition = pm.createNode("colorCondition")
@@ -1530,13 +1530,13 @@ class DGUtils:
 
 
     @staticmethod
-    def floatCondition(f1=0.0, f2=0.0, condition=0, f1Val=None, f2Val=None, floatLogic=None):
+    def floatCondition(f1=0.0, f2=0.0, condition=0, f1Val=None, f2Val=None):
         """
         :param f1(attr or float): first term
         :param f2 (attr or float): second term
-        :param condition (int): condition type: 0. ==   1. !=
+        :param condition (int ot pm): condition type: 0. ==   1. !=
                                                 2. <    3. >
-                                                4. <=   5. >=
+                                                4. <=   5. >=  or float logic node
 
         :param f1Val, f2Val (float): alternative values for the float condition node
         :return:
@@ -1559,14 +1559,15 @@ class DGUtils:
         ## func ##
         # float 1 / floatA
         nAttr = "AB"
-        if floatLogic == None:
+        if isinstance(condition, int) or isinstance(condition, float):
             floatLogic = DGUtils.floatLogic(f1, f2, condition)
+        else:
+            floatLogic = condition
 
         ## create float condition node ##
         floatCondition = pm.createNode("floatCondition")
         floatLogic.connect(floatCondition.condition)
 
-        print fVal
         for i in range(len(nAttr)):
             connectAttr = fVal[i] if fVal[i] != None else floats[i]
             if isinstance(connectAttr, float):
@@ -1575,6 +1576,45 @@ class DGUtils:
                 connectAttr.connect(floatCondition.attr("float%s" % nAttr[i]))
 
         return floatCondition.outFloat
+
+
+    @staticmethod
+    def clamp(input, min=(0,0,0), max=(1,1,1)):
+        """
+        create a clamp node and return the output value (float3)
+        :param min:
+        :param max:
+        :param input:
+        :return:
+        """
+        # check types
+        values = [min, max, input]
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+
+        # create node
+        clamp = pm.createNode("clamp")
+
+        # min max
+        for i, val in enumerate(["min", "max"]):
+            if isinstance(values[i], pm.Attribute):
+                if values[i].type() == "float3" or values[i].type() == "double3":
+                    values[i].connect(clamp.attr(val))
+                else:
+                    for axis in "RGB":
+                        values[i].connect(clamp.attr(val+axis))
+            else:
+                clamp.attr(val).set(values[i])
+
+        # input
+        # TODO: make this like multiplyDivide
+        if values[2].type() == "float3" or values[2].type() == "double3":
+            values[2].connect(clamp.input)
+        else:
+            values[2].connect(clamp.inputR)
+
+        return clamp.output
 
 
     @staticmethod
@@ -1754,7 +1794,7 @@ class VectorMath_Nodes():
         :return:
         """
         # check types
-        values = [quatB, quatA, blend, angleInt]
+        values = [quatA, quatB, blend, angleInt]  # swap quatA and quatB
         for i in range(len(values)):
             if isinstance(values[i], str):
                 values[i] = pm.PyNode(values[i])
@@ -1780,6 +1820,39 @@ class VectorMath_Nodes():
                 quatSlerp.attr("input%sQuat" % (i + 1)).set(values[i])
 
         return quatSlerp.outputQuat
+
+
+    @staticmethod
+    def quatToEuler(input, rotateOrder=0):
+        """
+        Create a node to convert a quat to a euler rotate
+        :param input(str, pm, list): quaternion attr or value
+        :param rotateOrder(str, pm, int): attr to define rotation order
+                                            0: xyz, 1: yzq, 2:zxy,
+                                            3:xzy, 4:yxz, 5: zyx
+        :return: outputRotate
+        """
+        # check types
+        values = [input, rotateOrder]
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+
+        # create node
+        quatTEu = pm.createNode("quatToEuler")
+        # rotate order
+        if isinstance(values[1], pm.Attribute):
+            values[1].connect(quatTEu.inputRotateOrder)
+        else:
+            quatTEu.inputRotateOrder.set(values[1])
+
+        # connect quat
+        if isinstance(values[0], pm.Attribute):
+            values[0].connect(quatTEu.inputQuat)
+        else:
+            quatTEu.inputQuat.set(values[0])
+
+        return quatTEu.outputRotate
 
 
     ## matrix ##
@@ -1808,6 +1881,7 @@ class VectorMath_Nodes():
     @staticmethod
     def matrixGetVector(matrix, vector):
         """
+        OBSOLETE
         Get the desired vector from a Matrix.
         Using node operations
         :param matrix: output attr with Matrix
@@ -1947,6 +2021,45 @@ class VectorMath_Nodes():
 
     ## vector ##
     @staticmethod
+    def vectorProduct(vectorA, vectorB=None, operation=0, matrix=None, normalize=False):
+        """
+        Create a vector product node.
+        it's useful for vector operations, and for extrat matrix vectors.
+        :param vectorA:
+        :param vectorB:
+        :param operation (int): 0: no operation, 1: dot product, 2: cross product,
+                                3: vector matrix product, 4: point matrix product.
+        -vector Matrix Product (3) useful to extract rotation vectors from matrix.
+        -point matrix product (4) useful to extract position vector from matrix.
+        :param matrix:
+        :param normalize:
+        :return:
+        # REVIEW: be careful with matrix attr connection, some times does not work
+        """
+        values = [vectorA, vectorB, matrix]
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+
+        # create node
+        vectorProduct = pm.createNode("vectorProduct")
+        vectorProduct.normalizeOutput.set(normalize)
+        vectorProduct.operation.set(operation)
+        # matrix
+        if matrix:
+            values[2].connect(vectorProduct.matrix)
+
+        # connect vectors
+        for i in range(2):
+            if isinstance(values[i], pm.Attribute):
+                values[i].connect(vectorProduct.attr("input%s" % (i+1)))
+            elif values[i] != None:
+                vectorProduct.attr("input%s" % (i + 1)).set(values[i])
+
+        return vectorProduct.output
+
+
+    @staticmethod
     def dotProduct(vectorA, vectorB):
         """
         Create a conection based on a space deform to drive attributes
@@ -2042,8 +2155,8 @@ class VectorMath_Nodes():
             logic2 = DGUtils.floatLogic(subsVecChannPlus, -0.001, 4)
             addLogic=VectorMath_Nodes.plusMinusAverage(1, logic1, logic2)  # or condition
 
-            nonZero = DGUtils.colorCondition(None, None, None, substractVector.output3D,
-                                             [0.001, 0.001, 0.001], addLogic)
+            nonZero = DGUtils.colorCondition(None, None, addLogic, substractVector.output3D,
+                                             [0.001, 0.001, 0.001])
             normalizeVector = pm.createNode('vectorProduct')
             normalizeVector.operation.set(0)  # no operation
             normalizeVector.normalizeOutput.set(True)
@@ -2168,28 +2281,69 @@ class VectorMath_Nodes():
 
 
     @staticmethod
-    def multiplyDivive(value1, value2, operation=1):
+    def multiplyDivive(valueA, valueB, operation=1):
 
         # check types
-        values = [value1, value2]
+        values = [valueA, valueB]
         for i in range(len(values)):
             if isinstance(values[i], str):
                 values[i] = pm.PyNode(values[i])
+
+            elif isinstance(values[i], list):
+                # if is a list, look for posible attributes inside
+                for j in range(3):
+                    if isinstance(values[i][j], str):
+                        values[i][j] = pm.PyNode(values[i][j])
 
         axis = "XYZ"
         multiplyDivide = pm.createNode("multiplyDivide")
         multiplyDivide.operation.set(operation)
         for i in range(len(values)):
-            if isinstance(values[i], list):
-                multiplyDivide.attr("input%s" % str(i+1)).set(values[i])
-                # todo: accept one attribute
-            else:
+            if isinstance(values[i], pm.Attribute):
                 if values[i].type() == "double3" or values[i].type() == "float3":
                     values[i].connect(multiplyDivide.attr("input%s" % str(i+1)))
                 else:
                     values[i].connect(multiplyDivide.attr("input%sX" % str(i+1)))
 
+            else:
+                if isinstance(values[i], list):
+                    for j, ax in enumerate(axis):
+                        if isinstance(values[i][j], pm.Attribute):
+                            values[i][j].connect(multiplyDivide.attr("input%s%s" % (str(i+1), ax)))
+                        elif values[i][j] != None:
+                            multiplyDivide.attr("input%s%s" % (str(i + 1), ax)).set(values[i][j])
+
+                else:
+                    multiplyDivide.attr("input%s" % str(i + 1)).set(values[i])
+
         return multiplyDivide.output
+
+
+    @staticmethod
+    def multDoubleLinear(valueA, valueB):
+        """
+        Create a multDoubleLinear node and return the output.
+        the difference with multiplyDivide is that double linear works only for single attributes.
+        and there aren't operation attribute
+        :param valueA(str or pm or float): first value
+        :param valueB(str or pm or float): second value
+        :return:
+        """
+        # check types
+        values = [valueA, valueB]
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+
+        # create Node
+        multDoubleLinear = pm.createNode("multDoubleLinear")
+        for i in range(len(values)):
+            if isinstance(values[i], pm.Attribute):
+                values[i].connect(multDoubleLinear.attr("input%s" % (i+1)))
+            else:
+                multDoubleLinear.attr("input%s" % (i+1)).set(values[i])
+
+        return multDoubleLinear.output
 
 
 class VectorMath():
@@ -2202,7 +2356,7 @@ class VectorMath():
     @staticmethod
     def barycentricCoords(vectorU, vectorV, vectorBar):
         """
-        given two vectors, return the barycentric coords of the barVector
+        given two vectors, return the u,v barycentric coords of the vectorBar
         :param vectorA (mVector):
         :param vectorB (mVector):
         :param point (mPoint):

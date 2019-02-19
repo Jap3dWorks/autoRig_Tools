@@ -65,7 +65,6 @@ class AutoRig(object):
 
         # I think i don't need this
         self.methodNames = [x[0] for x in inspect.getmembers(self, predicate=inspect.ismethod) if 'auto' in x[0]]
-        print (self.methodNames)
 
 
     # method decorator, check if already exist the rig part,
@@ -314,7 +313,7 @@ class AutoRig(object):
                 self.jointDriverList[n].rename(str(joint).replace('skin', 'main'))  # rename driver, useful for snap proxy model
                 pm.parentConstraint(self.jointDriverList[n], joint, maintainOffset=True, name='%s_drv_%s_%s_1_parentConstraint' % (self.chName, zone, jointNameSplit))
 
-        # stretch TODO: print spineJoints list
+        # stretch
         ARH.stretchCurveVolume(spineCurve, spineJoints, '%s_%s' % (self.chName, zone), self.mainCtr)
 
         # lock and hide attributes
@@ -691,7 +690,6 @@ class AutoRig(object):
         self.ikFkCtrGrp.addChild(self.ikFk_IkControl)  # parent to ctr group
 
         # set hierarchy
-        print self.ikFk_FkControllersList
         parent.addChild(self.ikFk_FkControllersList[0])
         parent.addChild(self.ikFk_MainJointList[0])
         parent.addChild(self.ikFk_IkJointList[0])
@@ -1586,18 +1584,16 @@ class AutoRig(object):
 
         return [], []
 
+
     def PSSkirt_auto(self, zone, drivers, parent):
         """
         PoseSpace skirt
-        TODO: Optimize -> maybe more object matrix with no necessity of mult inv matrix
+        TODO: Optimize -> use quat operations
         TODO: rename correctly
         :param zone:
         :param side:
         :param drivers:
         :param parent:
-        :param offset:
-        :param falloff:
-        :param range:
         :return:
         """
         # simplify names from modules
@@ -1684,8 +1680,9 @@ class AutoRig(object):
                 setattr(childDriver, axis, abs(int(getattr(childDriver, axis))))
 
             # get vector from matrix, x vector in this case, cause childDriver has only x translate
-            driverVector = VM_N.matrixGetVector(driverVectorGrp.worldMatrix[0], childDriver)  # <- X Axis
+            driverVector = VM_N.vectorProduct(childDriver, None, 3, "%s.worldMatrix[0]" % str(driverVectorGrp), True)  # <- X Axis
             logger.debug('Skirt driver Vector X: %s' % str(driverVector.get()))
+            logger.debug(childDriver.x + childDriver.y + childDriver.z)
 
             # node with driverVector
             driverVector.node().rename('%s_driver' % DVName)
@@ -1707,19 +1704,20 @@ class AutoRig(object):
             # create a transform node that will follow the driven but its twist
             # we reconstruct transform matrix for that porpoise
             # first axis info
-            refVectorY = VM_N.matrixGetVector(noTwistRef_grp.worldMatrix[0], planeVecs[0])
+            refVectorY = VM_N.vectorProduct(planeVecs[0], None, 3, "%s.worldMatrix[0]" % str(noTwistRef_grp), False)
             vectorY_Proj = VM_N.projectVectorOntoPlane(refVectorY, driverVector, True)
 
             # second axis info
-            refVectorZ = VM_N.matrixGetVector(noTwistRef_grp.worldMatrix[0], planeVecs[1])
+            refVectorZ = VM_N.vectorProduct(planeVecs[1],None,3, "%s.worldMatrix[0]" % str(noTwistRef_grp), False)
             vectorZ_Proj = VM_N.projectVectorOntoPlane(refVectorZ, driverVector, True)
 
             # x axis, useful later, for calculate de blend dot product
-            refVectorX = VM_N.matrixGetVector(noTwistRef_grp.worldMatrix[0], childDriver)
+            refVectorX = VM_N.vectorProduct(childDriver, None, 3, "%s.worldMatrix[0]" % str(noTwistRef_grp), True)
 
             # get vector dot products for z and y
+            # review:
             vecProd_list = DGU.treeTracker(vectorZ_Proj.node(), 'vectorProduct', True, 4)  # search for vectorProducts
-            dotZ_node = [node for node in vecProd_list if node.operation.get() == 1][0]  # save here dor Node
+            dotZ_node = [node for node in vecProd_list if node.operation.get() == 1][0]  # save here dot Node
             vecProd_list = DGU.treeTracker(vectorY_Proj.node(), 'vectorProduct', True, 4)
             dotY_node = [node for node in vecProd_list if node.operation.get() == 1][0]
             # get the abs Val of one dot product
@@ -1756,11 +1754,10 @@ class AutoRig(object):
             noTwistMatrix = VM_N.matrixMult(noTwistMatrix, parent.worldInverseMatrix[0])
             refNoOrientMatrix = VM_N.matrixMult(refNoOrientMatrix, parent.worldInverseMatrix[0])
 
-            # this can be deleted, visualization porpoises
-            # connect decompose matrix to a group
-            noTwistGrp = driverVectorGrp.duplicate(po=True)[0]
-            noTwistGrp.rename('%s_noTwistGrp' % str(driver))
-            VM_N.matrixDecompose(noTwistMatrix)[1].connect(noTwistGrp.rotate)
+            # use quat operations to blend between rotations
+            noTwistQuat = VM_N.matrixDecompose(noTwistMatrix)[0]
+            noTwistQuat.node().rename("%s_noTwistQuat" % (str(driver)))
+            refNoOrientQuat = VM_N.matrixDecompose(refNoOrientMatrix)[0]
 
             # vector mask
             # the projection of the driver over the ref plane, and normalized, we will use this to set the level
@@ -1771,7 +1768,7 @@ class AutoRig(object):
             maskDotVector.node().rename(str(driver)+"_projectedVector")
 
             # get notwist grp world space translation
-            noTwistGrpTrans_plug = VM_N.matrixGetVector(noTwistRef_grp.worldMatrix[0], [0, 0, 0, 1])  # world space trans
+            noTwistGrpTrans_plug = VM_N.vectorProduct([0, 0, 0], None, 4, "%s.worldMatrix[0]" % str(noTwistRef_grp), False)  # world space trans
             ##connect with controllers##
             # for each root, create a auto root
             # connect with no twist grp, using dot product to evaluate the weight for each auto
@@ -1793,9 +1790,12 @@ class AutoRig(object):
                 # get autogrp vector
                 autoGrpVector = pm.createNode('plusMinusAverage')
                 autoGrpVector.operation.set(2)  # subtract
-                autoGrpTrans_plug = VM_N.matrixGetVector(vRefGrpTotal_list[i].worldMatrix[0], [0, 0, 0, 1])
+                autoGrpTrans_plug = VM_N.vectorProduct([0, 0, 0], None, 4, "%s.worldMatrix[0]" % str(vRefGrpTotal_list[i]), False)
                 autoGrpTrans_plug.connect(autoGrpVector.input3D[0])
                 noTwistGrpTrans_plug.connect(autoGrpVector.input3D[1])
+
+                autoGrpTrans_plug.node().rename("skirt_autogrpTrans")
+                noTwistGrpTrans_plug.node().rename("skirt_noTwistGrpTrans")
 
                 # normalize grp vector #
                 # we can get a vector with len 0, this will give us an error, so create a condition to avoid
@@ -1813,79 +1813,55 @@ class AutoRig(object):
 
                 # normalize values
                 normVal = abs(iniDotY.get()[0]) + abs(iniDotZ.get()[0])  # abs values, to avoid errors
-                normalizeNode = pm.createNode('multiplyDivide')
-                normalizeNode.operation.set(2)  # divide
-                normalizeNode.input2.set([normVal, normVal, normVal])
-                iniDotY.children()[0].connect(normalizeNode.input1Y)
-                iniDotZ.children()[0].connect(normalizeNode.input1Z)
+                normalizeNode = VM_N.multiplyDivive([None, iniDotY.children()[0], iniDotZ.children()[0]],
+                                                    [normVal, normVal, normVal], 2)
 
                 # multiplyDots Z and Y
-                relDotY_node = pm.createNode('multDoubleLinear')
-                dotXY.children()[0].connect(relDotY_node.input1)
-                normalizeNode.outputY.connect(relDotY_node.input2)
-                # y
-                relDotZ_node = pm.createNode('multDoubleLinear')
-                dotXZ.children()[0].connect(relDotZ_node.input1)
-                normalizeNode.outputZ.connect(relDotZ_node.input2)
-                # plus z and y dot values
-                dotCtrBlend = pm.createNode('addDoubleLinear')
-                relDotY_node.output.connect(dotCtrBlend.input1)
-                relDotZ_node.output.connect(dotCtrBlend.input2)
-                # clamp dotCtrBlend
-                dotClamp = pm.createNode('clamp')
-                dotCtrBlend.output.connect(dotClamp.inputR)
-                dotClamp.max.set([1, 1, 1])
+                relDotY_node = VM_N.multDoubleLinear(dotXY.children()[0], normalizeNode.children()[1])
 
-                # blend orientations
-                # use blend between matrix
-                blendMatrix = pm.createNode('wtAddMatrix')
-                noTwistMatrix.connect(blendMatrix.wtMatrix[0].matrixIn)
-                dotClamp.outputR.connect(blendMatrix.wtMatrix[0].weightIn)
-                # create second weight matrix
-                secondWeight = pm.createNode('plusMinusAverage')
-                secondWeight.operation.set(2)
-                secondWeight.input1D[0].set(1)
-                dotClamp.outputR.connect(secondWeight.input1D[1])
-                # connect second matrix
-                refNoOrientMatrix.connect(blendMatrix.wtMatrix[1].matrixIn)
-                secondWeight.output1D.connect(blendMatrix.wtMatrix[1].weightIn)
+                # y
+                relDotZ_node = VM_N.multDoubleLinear(dotXZ.children()[0], normalizeNode.children()[2])
+
+                # plus z and y dot values
+                dotCtrBlend = VM_N.plusMinusAverage(1, relDotY_node, relDotZ_node)
+
+                # clamp dotCtrBlend
+                dotClamp = DGU.clamp(dotCtrBlend).children()[0]
+
+                ## blend orientations
+                blendQuat = VM_N.quatSlerp(noTwistQuat, refNoOrientQuat, dotClamp, 0)
+                blendQuat.node().rename("quatByskirt_sLerp")
 
                 # decompose matrix
                 if not lastNoTwistRef_grp:
-                    VM_N.matrixDecompose(blendMatrix.matrixSum)[1].connect(autoGrp.rotate)
+                    VM_N.quatToEuler(blendQuat).connect(autoGrp.rotate)
                 else:
                     # if another matrix exists yet, we should combine them
                     # det last decomposeMatrix and save it
-                    rotateDecompose = autoGrpTotal_list[i].rotate.inputs()[0]
-                    lastMatrix = rotateDecompose.inputMatrix.inputs(p=True)[0]
-                    lastZeroMat = lastMatrix.node().wtMatrix[1].matrixIn.inputs(p=True)[0]
-                    rotateDecompose.inputMatrix.disconnect()  # disconnect the last matrix
+                    blendQuatNode = autoGrpTotal_list[i].rotate.inputs()[0]  # quatToEuler
+                    quatSLerp = blendQuatNode.inputQuat.inputs()[0]  # quatSlerp
+                    #lastQuat = quatSLerp.input2Quat.inputs(p=True)[0]  # a decompose matrix quat
+                    lastZeroQuat = quatSLerp.input1Quat.inputs(p=True)[0]  # a decompose matrix quat
+                    blendQuatNode.inputQuat.disconnect()  # disconnect the last quat
 
                     # old connection
-                    offsetMat = VM_N.matrixMult(lastMatrix, VM_N.matrixInverse(lastZeroMat))
-                    o_OffsetAng = VM_N.quatToAxisAngle(VM_N.matrixDecompose(offsetMat)[0])[0]
+                    offsetQuat = VM_N.quatProd(quatSLerp.outputQuat, VM_N.quatInvert(lastZeroQuat))
+                    o_OffsetAng = VM_N.quatToAxisAngle(offsetQuat)[0]
 
                     # new connection
-                    offsetMat = VM_N.matrixMult(blendMatrix.matrixSum, VM_N.matrixInverse(refNoOrientMatrix))
-                    n_OffsetAng = VM_N.quatToAxisAngle(VM_N.matrixDecompose(offsetMat)[0])[0]
+                    offsetQuat = VM_N.quatProd(blendQuat, VM_N.quatInvert(refNoOrientQuat))
+                    n_OffsetAng = VM_N.quatToAxisAngle(offsetQuat)[0]
 
                     # compare rotations
-                    floatCondition = DGU.floatCondition(o_OffsetAng, n_OffsetAng, 3, 1, 0)
-                    invCondition = pm.createNode("plusMinusAverage")
-                    invCondition.operation.set(2)  # substract
-                    invCondition.input1D[0].set(1)
-                    floatCondition.connect(invCondition.input1D[1])
+                    floatConditionSum = VM_N.plusMinusAverage(1, o_OffsetAng, n_OffsetAng)
+                    floatCondnonZero = DGU.floatCondition(floatConditionSum, 0.0, 0, 0.01, floatConditionSum)  # avoid divide by 0
+                    floatConditionNorm = VM_N.multiplyDivive(o_OffsetAng, floatCondnonZero, 2)
 
                     # wAddMatrix
-                    wAddMatrix = pm.createNode("wtAddMatrix")
-                    lastMatrix.connect(wAddMatrix.wtMatrix[0].matrixIn)
-                    floatCondition.connect(wAddMatrix.wtMatrix[0].weightIn)
-
-                    blendMatrix.matrixSum.connect(wAddMatrix.wtMatrix[1].matrixIn)
-                    invCondition.output1D.connect(wAddMatrix.wtMatrix[1].weightIn)
+                    wAddMatrix = VM_N.quatSlerp(quatSLerp.outputQuat, blendQuat, floatConditionNorm.children()[0])
 
                     # reconnect decompose matrix
-                    wAddMatrix.matrixSum.connect(rotateDecompose.inputMatrix)
+                    wAddMatrix.connect(blendQuatNode.inputQuat)
 
             # store info of the last driver
             lastNoTwistRef_grp = noTwistRef_grp
@@ -1923,7 +1899,6 @@ class AutoRig(object):
             pm.pointConstraint(pointControllers[i], joint, maintainOffset=False)
             pm.orientConstraint(pointControllers[i], joint, maintainOffset=False)
             ARC.DGUtils.connectAttributes(pointControllers[i], joint, ['scale'], 'XYZ')
-
 
 
     def create_controller(self, name, controllerType, s=1.0, colorIndex=4):
