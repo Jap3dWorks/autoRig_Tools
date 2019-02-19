@@ -1,5 +1,5 @@
 # file with creation funcs for akona
-from maya import cmds
+import maya.cmds as cmds
 import pymel.core as pm
 import re
 
@@ -28,6 +28,7 @@ def akonaRigA(name='akona', path='D:\_docs\_Animum\Akona'):
                                 lambda: akonaRig.foot_auto(('foot', 'toe'), 'zx'))
 
     # arms
+
     for side in sides:
         akonaRig.ikFkChain_auto(side, akonaRig.ikControllers['spine'][-1], 'arm', True, False,
                                 lambda: akonaRig.hand_auto(('hand', 'finger'), None),
@@ -36,7 +37,8 @@ def akonaRigA(name='akona', path='D:\_docs\_Animum\Akona'):
 
     ## skirt ##  # review: save main list too
     skirtDrivers = ['akona_leg_left_upperLeg_main_joint', 'akona_leg_right_upperLeg_main_joint']
-    akonaRig.PSSkirt_auto('skirt', skirtDrivers, akonaRig.ikControllers['spine'][0], 0, 1.5, 80)
+    akonaRig.PSSkirt_auto('skirt', skirtDrivers, akonaRig.ikControllers['spine'][0])
+
 
     return
     ## hair ##
