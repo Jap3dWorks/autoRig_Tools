@@ -1436,6 +1436,33 @@ class DGUtils:
     """
 
     @staticmethod
+    def floatLogic(floatA, floatB, condition):
+        """
+        create a float logic node
+        :param condition: condition type: 0. ==   1. !=
+                                        2. <    3. >
+                                        4. <=   5. >=
+        :return:
+        """
+        ## check types ##
+        floats = [floatA, floatB]
+        for i in range(len(floats)):
+            if isinstance(floats[i], str):
+                floats[i] = pm.PyNode(floats[i])
+
+        nAttr = "AB"
+        floatLogic = pm.createNode("floatLogic")
+        floatLogic.operation.set(condition)
+        for i in range(len(floats)):
+            if isinstance(floats[i], float) or isinstance(floats[i], int):
+                floatLogic.attr("float%s" % nAttr[i]).set(floats[i])
+            else:
+                floats[i].connect(floatLogic.attr("float%s" % nAttr[i]))
+
+        return floatLogic.outBool
+
+
+    @staticmethod
     def colorLogic(colorA, colorB, condition):
         """
         create a color logic node
@@ -1503,7 +1530,7 @@ class DGUtils:
 
 
     @staticmethod
-    def floatCondition(f1, f2, condition, f1Val=None, f2Val=None):
+    def floatCondition(f1=0.0, f2=0.0, condition=0, f1Val=None, f2Val=None, floatLogic=None):
         """
         :param f1(attr or float): first term
         :param f2 (attr or float): second term
@@ -1532,23 +1559,16 @@ class DGUtils:
         ## func ##
         # float 1 / floatA
         nAttr = "AB"
-        floatLogic = pm.createNode("floatLogic")
-        # set condition
-        floatLogic.operation.set(condition)
-
-        for i, f in enumerate(floats):
-            if isinstance(f, float):
-                floatLogic.attr("float%s" % nAttr[i]).set(f)
-            else:
-                f.connect(floatLogic.attr("float%s" % nAttr[i]))
+        if floatLogic == None:
+            floatLogic = DGUtils.floatLogic(f1, f2, condition)
 
         ## create float condition node ##
         floatCondition = pm.createNode("floatCondition")
-        floatLogic.outBool.connect(floatCondition.condition)
+        floatLogic.connect(floatCondition.condition)
 
         print fVal
         for i in range(len(nAttr)):
-            connectAttr = fVal[i] if fVal[i] != None else floatLogic.attr("float%s" % nAttr[i])
+            connectAttr = fVal[i] if fVal[i] != None else floats[i]
             if isinstance(connectAttr, float):
                 floatCondition.attr("float%s" % nAttr[i]).set(connectAttr)
             else:
@@ -1665,31 +1685,7 @@ class VectorMath_Nodes():
     class based on common Node vector operations.
     This class exists for organize porpoises.
     """
-    @staticmethod
-    def multiplyDivive(value1, value2, operation):
-
-        # check types
-        values = [value1, value2]
-        for i in range(len(values)):
-            if isinstance(values[i], str):
-                values[i] = pm.PyNode(values[i])
-
-        axis = "XYZ"
-        multiplyDivide = pm.createNode("multiplyDivide")
-        multiplyDivide.operation.set(operation)
-        for i in range(len(values)):
-            if isinstance(values[i], list):
-                multiplyDivide.attr("input%s" % str(i+1)).set(values[i])
-                # todo: accept list of attributes
-
-            else:
-                if values[i].type() == "double3" or values[i].type() == "float3":
-                    values[i].connect(multiplyDivide.attr("input%s" % str(i+1)))
-                else:
-                    values[i].connect(multiplyDivide.attr("input%sX" % str(i+1)))
-
-        return multiplyDivide.output
-
+    ## quaternions ##
     @staticmethod
     def quatToAxisAngle(quat):
         """
@@ -1708,7 +1704,87 @@ class VectorMath_Nodes():
 
 
     @staticmethod
-    def decomposeMatrix(matrix):
+    def quatProd(quatA, quatB):
+        """
+        Multiply quaternions
+        :param quatA: quat attribute
+        :param quatB: quat attribute
+        :return:
+        """
+        # check types
+        values = [quatA, quatB]
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+
+        # create node
+        quatProd = pm.createNode("quatProd")
+        values[0].connect(quatProd.input1Quat)
+        values[1].connect(quatProd.input2Quat)
+
+        return quatProd.outputQuat
+
+
+    @staticmethod
+    def quatInvert(quat):
+        """
+        Create a quatInverse node and return the quat output
+        :param quat:
+        :return:
+        """
+        # check type
+        if isinstance(quat, str):
+            quat = pm.PyNode(quat)
+
+        quatInverse = pm.createNode("quatInvert")
+        quat.connect(quatInverse.inputQuat)
+
+        return quatInverse.outputQuat
+
+
+    @staticmethod
+    def quatSlerp(quatB, quatA, blend=0.5, angleInt=0):
+        """
+        create a quatSlerp node ans return the output attr
+        blend 1 => full quatB
+        :param quatA(str, pm, list): quat attr
+        :param quatB(str, pm, list): quat attr
+        :param blend(str, pm): blend weight
+        :param angleInt(str, int): type interpolation: 0: shortest, 1: positive, 2: negative
+        :return:
+        """
+        # check types
+        values = [quatB, quatA, blend, angleInt]
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+
+        quatSlerp = pm.createNode("quatSlerp")
+        # interpolation type
+        if isinstance(values[3], pm.Attribute):
+            values[3].connect(quatSlerp.angleInterpolation)
+        else:
+            quatSlerp.angleInterpolation.set(values[3])
+
+        # blend
+        if isinstance(values[2], pm.Attribute):
+            values[2].connect(quatSlerp.inputT)
+        else:
+            quatSlerp.inputT.set(values[2])
+
+        # quats
+        for i in range(2):
+            if isinstance(values[i], pm.Attribute):
+                values[i].connect(quatSlerp.attr("input%sQuat" % (i+1)))
+            else:
+                quatSlerp.attr("input%sQuat" % (i + 1)).set(values[i])
+
+        return quatSlerp.outputQuat
+
+
+    ## matrix ##
+    @staticmethod
+    def matrixDecompose(matrix):
         """
         Decompose a matrix into:
             0. quaternion.
@@ -1730,7 +1806,110 @@ class VectorMath_Nodes():
 
 
     @staticmethod
-    def multMatrix(*args):
+    def matrixGetVector(matrix, vector):
+        """
+        Get the desired vector from a Matrix.
+        Using node operations
+        :param matrix: output attr with Matrix
+        :param vector:
+        :return: vectorProduct Node
+        """
+        # check args types and create pm nodes
+        if isinstance(matrix, str):
+            matrix = pm.PyNode(matrix)
+        if isinstance(vector, list) or isinstance(vector, tuple) or isinstance(vector, set):
+            if len(vector) > 3:
+                vector = pm.datatypes.Point(vector)
+            else:
+                vector = pm.datatypes.Vector(vector)
+
+        output = []
+        if vector.x + vector.y + vector.z:
+            # create vector Product
+            driverVecProduct = pm.createNode('vectorProduct')
+            driverVecProduct.normalizeOutput.set(True)
+            # connect matrix to the node
+            matrix.connect(driverVecProduct.matrix)
+
+            # set Vector product to vector matrix product
+            driverVecProduct.operation.set(3)  # 3 is matrix vector product
+            for i, attr in enumerate('XYZ'):
+                driverVecProduct.attr('input1%s' % attr).set(getattr(vector, attr.lower()))
+
+            driverVecProduct.normalizeOutput.set(True)
+
+            output.append(driverVecProduct.output)
+
+        if isinstance(vector, pm.datatypes.Point):
+            if vector.w:
+                transVecProduct = pm.createNode('vectorProduct')
+                transVecProduct.normalizeOutput.set(False)
+                matrix.connect(transVecProduct.matrix)
+                transVecProduct.operation.set(4)  # point matrix product
+
+                output.append(transVecProduct.output)
+
+        if len(output) > 1:
+            return output
+        else:
+            return output[0]
+
+
+    @staticmethod
+    def matrix4by4(vectorX, vectorY, vectorZ, position=None):
+        """
+        Given the correct vectors, create a 4 by 4 matrix
+        :param vectorX:
+        :param vectorY:
+        :param vectorZ:
+        :param position:
+        :return:
+        """
+        ## check types ##
+        # get args and values
+        argsStr = [VectorMath_Nodes.matrix4by4.func_code.co_varnames[i] for i in
+                   range(VectorMath_Nodes.matrix4by4.func_code.co_argcount - 1)]
+
+        argVal = [locals()[arg] for arg in argsStr]
+
+        # prepare dictionaries
+        # data types
+        vectorList = {}
+        for i, argStr in enumerate(argsStr):
+            if isinstance(argVal[i], str):
+                argVal[i] = pm.PyNode(argVal[i])
+            if not (argVal[i].type() == 'double3' or argVal[i].type() == 'float3'):
+                logger.info('%s must be type double3 or float3' % argVal[i])
+                return
+            # add to dictionary
+            vectorList[argStr] = argVal[i]
+
+        ## construct circuitry ##
+        fourByfourMatrix = pm.createNode('fourByFourMatrix')
+        # connect Vectors
+        for i, argStr in enumerate(argsStr):
+            childAttr = vectorList[argStr].children()
+
+            for j, cAttr in enumerate(childAttr):
+                cAttr.connect(fourByfourMatrix.attr('in%s%s' % (i, j)))
+
+        # if position, connect too position
+        if position:
+            if isinstance(position, str):
+                position = pm.PyNode(position)
+            if not (position.type() == 'double3' or position.type() == 'float3'):
+                logger.info('position must be type double3 or float3')
+                return
+
+            childAttr = position.children()
+            for j, cAttr in enumerate(childAttr):
+                cAttr.connect(fourByfourMatrix.attr('in3%s' % j))
+
+        return fourByfourMatrix.output
+
+
+    @staticmethod
+    def matrixMult(*args):
         """
         return a plug with the result of multiply matrix
         :param args: matrix plugs
@@ -1749,7 +1928,7 @@ class VectorMath_Nodes():
 
 
     @staticmethod
-    def inverseMatrix(matrix):
+    def matrixInverse(matrix):
         """
         return a Plug with the inversed matrix
         :param matrix:
@@ -1766,35 +1945,7 @@ class VectorMath_Nodes():
         return inverseNode.outputMatrix
 
 
-    @staticmethod
-    def absVal(value):
-        """
-        Return a plug with the abs value
-        :param value: plug
-        :return:
-        """
-        # check node types
-        if isinstance(value, str):
-            value = pm.PyNode(value)
-
-        # square power
-        powerNode = pm.createNode('multiplyDivide')
-        powerNode.operation.set(3)  #power
-        for axis in 'XYZ':
-            powerNode.attr('input2%s' % axis).set(2)
-
-        value.connect(powerNode.input1X)
-
-        # square root
-        squareNode = pm.createNode('multiplyDivide')
-        squareNode.operation.set(3)  # power
-        for axis in 'XYZ':
-            squareNode.attr('input2%s' % axis).set(.5)
-        powerNode.outputX.connect(squareNode.input1X)
-
-        return squareNode.outputX
-
-
+    ## vector ##
     @staticmethod
     def dotProduct(vectorA, vectorB):
         """
@@ -1844,59 +1995,6 @@ class VectorMath_Nodes():
 
 
     @staticmethod
-    def build4by4Matrix(vectorX, vectorY, vectorZ, position=None):
-        """
-        Given the correct vectors, create a 4 by 4 matrix
-        :param vectorX:
-        :param vectorY:
-        :param vectorZ:
-        :param position:
-        :return:
-        """
-        ## check types ##
-        # get args and values
-        argsStr = [VectorMath_Nodes.build4by4Matrix.func_code.co_varnames[i] for i in
-                   range(VectorMath_Nodes.build4by4Matrix.func_code.co_argcount - 1)]
-
-        argVal = [locals()[arg] for arg in argsStr]
-
-        # prepare dictionaries
-        # data types
-        vectorList = {}
-        for i, argStr in enumerate(argsStr):
-            if isinstance(argVal[i], str):
-                argVal[i] = pm.PyNode(argVal[i])
-            if not (argVal[i].type() == 'double3' or argVal[i].type() == 'float3'):
-                logger.info('%s must be type double3 or float3' % argVal[i])
-                return
-            # add to dictionary
-            vectorList[argStr] = argVal[i]
-
-        ## construct circuitry ##
-        fourByfourMatrix = pm.createNode('fourByFourMatrix')
-        # connect Vectors
-        for i, argStr in enumerate(argsStr):
-            childAttr = vectorList[argStr].children()
-
-            for j, cAttr in enumerate(childAttr):
-                cAttr.connect(fourByfourMatrix.attr('in%s%s' % (i, j)))
-
-        # if position, connect too position
-        if position:
-            if isinstance(position, str):
-                position = pm.PyNode(position)
-            if not (position.type() == 'double3' or position.type() == 'float3'):
-                logger.info('position must be type double3 or float3')
-                return
-
-            childAttr = position.children()
-            for j, cAttr in enumerate(childAttr):
-                cAttr.connect(fourByfourMatrix.attr('in3%s' % j))
-
-        return fourByfourMatrix.output
-
-
-    @staticmethod
     def projectVectorOntoPlane(vectorOutput, vectorNormal, normalized=False):
         """
         Calculate the vector projection onto a plane
@@ -1937,15 +2035,15 @@ class VectorMath_Nodes():
 
         # if normalized, return the vector normalized
         if normalized:
-            logic1=DGUtils.colorLogic(substractVector.output3D, [0.01,0.01,0.01], 5)
-            logic2=DGUtils.colorLogic(substractVector.output3D, [-0.01,-0.01,-0.01], 4)
-            addLogic=pm.createNode("addDoubleLinear")
-            logic1.connect(addLogic.input1)
-            logic2.connect(addLogic.input2)
+            subsVecChann = substractVector.output3D.children()
+            subsVecChannPlus = VectorMath_Nodes.plusMinusAverage(1, subsVecChann[0], subsVecChann[1], subsVecChann[2])
 
-            #logicMult=VectorMath_Nodes.multiplyDivive(logic1, logic2, 1)
+            logic1 = DGUtils.floatLogic(subsVecChannPlus, 0.001, 5)
+            logic2 = DGUtils.floatLogic(subsVecChannPlus, -0.001, 4)
+            addLogic=VectorMath_Nodes.plusMinusAverage(1, logic1, logic2)  # or condition
+
             nonZero = DGUtils.colorCondition(None, None, None, substractVector.output3D,
-                                             [0.001, 0.001, 0.001], addLogic.output)
+                                             [0.001, 0.001, 0.001], addLogic)
             normalizeVector = pm.createNode('vectorProduct')
             normalizeVector.operation.set(0)  # no operation
             normalizeVector.normalizeOutput.set(True)
@@ -2004,55 +2102,94 @@ class VectorMath_Nodes():
 
         return vectorBetween, vector1Product, vector2Product
 
+    ## aritmethic ##
+    @staticmethod
+    def absVal(value):
+        """
+        Return a plug with the abs value
+        :param value: plug
+        :return:
+        """
+        # check node types
+        if isinstance(value, str):
+            value = pm.PyNode(value)
+
+        # square power
+        powerNode = pm.createNode('multiplyDivide')
+        powerNode.operation.set(3)  #power
+        for axis in 'XYZ':
+            powerNode.attr('input2%s' % axis).set(2)
+
+        value.connect(powerNode.input1X)
+
+        # square root
+        squareNode = pm.createNode('multiplyDivide')
+        squareNode.operation.set(3)  # power
+        for axis in 'XYZ':
+            squareNode.attr('input2%s' % axis).set(.5)
+        powerNode.outputX.connect(squareNode.input1X)
+
+        return squareNode.outputX
+
 
     @staticmethod
-    def getVectorFromMatrix(matrix, vector):
+    def plusMinusAverage(operation=1, *args):
         """
-        Get the desired vector from a Matrix.
-        Using node operations
-        :param matrix: output attr with Matrix
-        :param vector:
-        :return: vectorProduct Node
+        create a plusminusaverage node with the input *args
+        :param operation:
+        :param values:
+        :return:
         """
-        # check args types and create pm nodes
-        if isinstance(matrix, str):
-            matrix = pm.PyNode(matrix)
-        if isinstance(vector, list) or isinstance(vector, tuple) or isinstance(vector, set):
-            if len(vector) > 3:
-                vector = pm.datatypes.Point(vector)
+        # check types
+        values = list(args)
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+                print values[i], type(values[i])
+
+        # create node
+        plusMinus = pm.createNode("plusMinusAverage")
+        plusMinus.operation.set(operation)
+
+        if isinstance(values[0], float) or isinstance(values[0], int):
+            attrDim = "input1D"
+        elif isinstance(values[0], list):
+            attrDim = "input1D"
+        elif isinstance(values[0], pm.Attribute):
+            attrDim = "input3D" if values[0].type() == "double3" or values[0].type() == "float3" else "input1D"
+
+        for i in range(len(values)):
+            if isinstance(values[i], float) or isinstance(values[i], int):
+                plusMinus.attr(attrDim+"[%s]" % i).set(values[i])
+            elif isinstance(values[i], pm.Attribute):
+                values[i].connect(plusMinus.attr(attrDim + "[%s]" % i))
+
+        return plusMinus.attr(attrDim.replace("input", "output"))
+
+
+    @staticmethod
+    def multiplyDivive(value1, value2, operation=1):
+
+        # check types
+        values = [value1, value2]
+        for i in range(len(values)):
+            if isinstance(values[i], str):
+                values[i] = pm.PyNode(values[i])
+
+        axis = "XYZ"
+        multiplyDivide = pm.createNode("multiplyDivide")
+        multiplyDivide.operation.set(operation)
+        for i in range(len(values)):
+            if isinstance(values[i], list):
+                multiplyDivide.attr("input%s" % str(i+1)).set(values[i])
+                # todo: accept one attribute
             else:
-                vector = pm.datatypes.Vector(vector)
+                if values[i].type() == "double3" or values[i].type() == "float3":
+                    values[i].connect(multiplyDivide.attr("input%s" % str(i+1)))
+                else:
+                    values[i].connect(multiplyDivide.attr("input%sX" % str(i+1)))
 
-        output = []
-        if vector.x + vector.y + vector.z:
-            # create vector Product
-            driverVecProduct = pm.createNode('vectorProduct')
-            driverVecProduct.normalizeOutput.set(True)
-            # connect matrix to the node
-            matrix.connect(driverVecProduct.matrix)
-
-            # set Vector product to vector matrix product
-            driverVecProduct.operation.set(3)  # 3 is matrix vector product
-            for i, attr in enumerate('XYZ'):
-                driverVecProduct.attr('input1%s' % attr).set(getattr(vector, attr.lower()))
-
-            driverVecProduct.normalizeOutput.set(True)
-
-            output.append(driverVecProduct.output)
-
-        if isinstance(vector, pm.datatypes.Point):
-            if vector.w:
-                transVecProduct = pm.createNode('vectorProduct')
-                transVecProduct.normalizeOutput.set(False)
-                matrix.connect(transVecProduct.matrix)
-                transVecProduct.operation.set(4)  # point matrix product
-
-                output.append(transVecProduct.output)
-
-        if len(output) > 1:
-            return output
-        else:
-            return output[0]
+        return multiplyDivide.output
 
 
 class VectorMath():
