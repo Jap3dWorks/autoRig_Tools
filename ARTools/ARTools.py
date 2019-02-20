@@ -247,7 +247,6 @@ class PSDUtils(object):
             vecBaseSpace = vecNegSpace * matrixBas3x3
             # compare vector length form joint position
 
-
             # apply diference
             originalPos = base.getPoint(i, 'object')
 
@@ -259,37 +258,50 @@ class PSDUtils(object):
 
 
     @staticmethod
-    def getDeltaByJointAngle(positive, negative, skinMesh,  joint):
+    def getDeltaByJointAngle(positive, skinMesh,  joint):
         """
-        FIXME: problems with the total quaternion rotation. data process seems works fine
+        # TODO: optimize
+        FIXME: seems that the system left a litle range of angle.
+        tested with matrix transform and there is the same problem.
+        it is possible some joint data are getting bad results?
         Extract a delta from a sculpted position mesh, more precise method
         positive(pm.mesh): posed sculpted mesh
-        negative(pm.mesh): posed mesh TODO, this can be unnecessary
         skinMesh(pm.mesh): skined mesh, posed like sculpted mesh. be careful with the input nodes, the skin cluster may be accessible
         joint(pm.Joint): joint rotated for the pose
         """
+        toApiQ = lambda x: OpenMaya.MQuaternion(x)
+
+        # check types
+        positive = pm.PyNode(positive) if isinstance(positive, str) else positive
+        skinMesh = pm.PyNode(skinMesh) if isinstance(skinMesh, str) else skinMesh
+        skinMesh = skinMesh.getShape() if isinstance(skinMesh, pm.nodetypes.Transform) else skinMesh
+        joint = pm.PyNode(joint) if isinstance(joint, str) else joint
+
+        # get diferences
         diferenceIndex = []
         for i, point in enumerate(positive.getPoints('object')):
-            if point != negative.getPoint(i, 'object'):
+            if point != skinMesh.getPoint(i, 'object'):
                 diferenceIndex.append(i)
 
         skinCluster = skinMesh.listConnections(connections=True, type='skinCluster')[0][1]
         skinCluster = pm.PyNode(skinCluster)  # convert to pyNode
 
         # query angles
-        angleQ = joint.getRotation(quaternion=True, space='preTransform')
-        worldQ = joint.getRotation(quaternion=True, space='world')
-        angleEu = joint.getRotation()  # euler
-        angle = math.acos(angleQ[3])*2  # angle Radians
+        worldQ = toApiQ(joint.getRotation(quaternion=True, space='world'))
+        # get joint angle
+        angleEu = joint.getRotation()
+        # set to zero, to query the quaternion value
         joint.setRotation([0, 0, 0])
-        jointZeroR = joint.getRotation(quaternion=True, space='world')
+        zeroQ = toApiQ(joint.getRotation(quaternion=True, space='world'))
 
-        jointMatrix = pm.xform(joint, q=True, m=True, ws=True)
-        jointMatrix = pm.datatypes.MatrixN([jointMatrix[0], jointMatrix[1], jointMatrix[2]],
-                                           [jointMatrix[4], jointMatrix[5], jointMatrix[6]],
-                                           [jointMatrix[8], jointMatrix[9], jointMatrix[10]])
+        offsetQ = zeroQ.invertIt() * worldQ  # final quaternion  angle
 
-        jointOrient = joint.getOrientation()
+        rotAxis = OpenMaya.MVector()
+        util = OpenMaya.MScriptUtil()
+        ptr = util.asDoublePtr()
+        offsetQ.getAxisAngle(rotAxis, ptr)  # <- get angle and vector
+        angle = util.getDouble(ptr)
+        print "rotation angle, ", math.degrees(angle)
 
         # joint position
         jointPos = joint.getTranslation('world')
@@ -297,42 +309,68 @@ class PSDUtils(object):
         # create base pose
         baseMesh = skinMesh.duplicate(name='%s_delta' % str(skinMesh))[0]
         baseMeshShape = baseMesh.getShape()
-        joint.setRotation(angleEu)
 
+        # TODO: vertex no modified get from skinned mesh joint pos == 0
         for index in diferenceIndex:
             influence = pm.skinPercent(skinCluster, skinMesh.vtx[index], transform=joint, query=True)
             # influence plus influences of child joints
             joinChild = [str(j) for j in joint.listRelatives(ad=True)]
             jointsInfluence = pm.skinPercent(skinCluster, skinMesh.vtx[index], q=True, transform=None)
             matchJoint = set(joinChild).intersection(set(jointsInfluence))
+            # print "first query inf: ", influence
             for j in matchJoint:
                 influence += pm.skinPercent(skinCluster, skinMesh.vtx[index], transform=j, query=True)
+                # print "Second query inf: ", influence
 
             # vector from joint to vertex sculpted
-            sculptVector = positive.getPoint(index, 'object')
+            sculptVector = positive.getPoint(index, 'object')  # review
             sculptVector = pm.datatypes.Vector(sculptVector - jointPos)
 
             # if influence == 0 don't calculate
+            # if influence < 1 && influence > 0 -> enter this method
             if influence:
                 angleA = math.pi - (angle/2 + math.pi/2)
                 angleB = math.pi - (angle*influence + angleA)
                 # with sin rules get the length of final vector
                 lengthFVector = sculptVector.length()*math.sin(angleB)/math.sin(angleA)
-
                 # create relative quaternion to influence
-                qW = math.cos(angle*(-influence) / 2)
-                util = OpenMaya.MScriptUtil()
-                util.createFromDouble(angleQ.x, angleQ.y, angleQ.z, qW)
-                ptr = util.asDoublePtr()
-                relativeQ = pm.datatypes.Quaternion(ptr)
+                qAngl = - (angle * influence)
+                relativeQ = OpenMaya.MQuaternion(qAngl, rotAxis)
 
                 rotatedVector = sculptVector.rotateBy(relativeQ)
                 rotatedVector.normalize()
-                rotatedVector = rotatedVector*lengthFVector
+                rotatedVector = rotatedVector*lengthFVector  # correct length
 
                 sculptVector = rotatedVector
 
+            # elif influence == 0:
+            #     baseMeshShape.setPoint(index, sculptVector + jointPos, 'world')
+
+            # elif influence == 1:
+            #     # pose0
+            #     face = [f.index() for f in skinMesh.vtx[index].connectedFaces()][0]
+            #     tangent_z = skinMesh.getFaceVertexTangent(face, index, "world")
+            #     binormal_z= skinMesh.getFaceVertexBinormal(face, index, "world")
+            #     normal_z = skinMesh.getFaceVertexNormal(face, index, "world")
+            #     matrix_z = pm.datatypes.Matrix(tangent_z, binormal_z, normal_z)
+            #
+            #     # posed
+            #     joint.setRotation(angleEu)
+            #     tangent_p = skinMesh.getFaceVertexTangent(face, index, "world")
+            #     binormal_p = skinMesh.getFaceVertexBinormal(face, index, "world")
+            #     normal_p = skinMesh.getFaceVertexNormal(face, index, "world")
+            #     matrix_p = pm.datatypes.Matrix(tangent_p, binormal_p, normal_p)
+            #
+            #     # return to zero
+            #     joint.setRotation([0,0,0])
+            #
+            #     # transpose vector
+            #     sculptVector_p = sculptVector * matrix_p.inverse()
+            #     sculptVector = sculptVector_p * matrix_z
+
             baseMeshShape.setPoint(index, sculptVector + jointPos, 'world')
+
+        joint.setRotation(angleEu)
 
 
     @staticmethod
@@ -646,6 +684,7 @@ class PickerTools(object):
 
         return controllers
 
+
 #########################
 ##Shape Modelling Tools##
 #########################
@@ -722,6 +761,7 @@ class MirrorControllers(object):
                 pm.xform(pairCtr[negativeIndex], ws=worldSpace, m=flipMatrix)
 
             logger.info('Symmetry done')
+
 
 def dupGeoEachFrame(mesh, animatedAttr):
     """

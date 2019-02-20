@@ -2333,7 +2333,6 @@ class VectorMath():
     @staticmethod
     def orientToPlane(matrix, plane=None, respectAxis=None):
         """
-        TODO: include in vectorOperation class
         Conserve the general orient of a matrixTransform, but aligned to a plane.
         option to select the respect axis
         Args:
@@ -2455,6 +2454,7 @@ class VectorMath():
         :param normal:
         :return:
         """
+        pass
         # check data type
 
     @staticmethod
