@@ -1879,57 +1879,6 @@ class VectorMath_Nodes():
 
 
     @staticmethod
-    def matrixGetVector(matrix, vector):
-        """
-        OBSOLETE
-        Get the desired vector from a Matrix.
-        Using node operations
-        :param matrix: output attr with Matrix
-        :param vector:
-        :return: vectorProduct Node
-        """
-        # check args types and create pm nodes
-        if isinstance(matrix, str):
-            matrix = pm.PyNode(matrix)
-        if isinstance(vector, list) or isinstance(vector, tuple) or isinstance(vector, set):
-            if len(vector) > 3:
-                vector = pm.datatypes.Point(vector)
-            else:
-                vector = pm.datatypes.Vector(vector)
-
-        output = []
-        if vector.x + vector.y + vector.z:
-            # create vector Product
-            driverVecProduct = pm.createNode('vectorProduct')
-            driverVecProduct.normalizeOutput.set(True)
-            # connect matrix to the node
-            matrix.connect(driverVecProduct.matrix)
-
-            # set Vector product to vector matrix product
-            driverVecProduct.operation.set(3)  # 3 is matrix vector product
-            for i, attr in enumerate('XYZ'):
-                driverVecProduct.attr('input1%s' % attr).set(getattr(vector, attr.lower()))
-
-            driverVecProduct.normalizeOutput.set(True)
-
-            output.append(driverVecProduct.output)
-
-        if isinstance(vector, pm.datatypes.Point):
-            if vector.w:
-                transVecProduct = pm.createNode('vectorProduct')
-                transVecProduct.normalizeOutput.set(False)
-                matrix.connect(transVecProduct.matrix)
-                transVecProduct.operation.set(4)  # point matrix product
-
-                output.append(transVecProduct.output)
-
-        if len(output) > 1:
-            return output
-        else:
-            return output[0]
-
-
-    @staticmethod
     def matrix4by4(vectorX, vectorY, vectorZ, position=None):
         """
         Given the correct vectors, create a 4 by 4 matrix
@@ -2214,6 +2163,7 @@ class VectorMath_Nodes():
         plusMinus.output3D.connect(vectorBetween.input1)
 
         return vectorBetween, vector1Product, vector2Product
+
 
     ## aritmethic ##
     @staticmethod
