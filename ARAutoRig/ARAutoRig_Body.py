@@ -2,18 +2,14 @@ import pymel.core as pm
 import re
 from maya import OpenMaya
 
-from ARCore import ctrSaveLoadToJson
-import ARCore.ARCore as ARC
-import ARCore.ARHelper as ARH
-
-reload(ARC)
-reload(ctrSaveLoadToJson)  # review: reload
-
-import inspect
+from ..ARCore import ctrSaveLoadToJson
+from ..ARCore import ARCore as ARC
+from ..ARCore import ARHelper as ARH
+import ARAutoRig_Abstract
 
 import logging
 logging.basicConfig()
-logger = logging.getLogger('autoRig:')
+logger = logging.getLogger('ARAutoRig_Body:')
 logger.setLevel(logging.DEBUG)
 
 # TODO: main Joints, naming pe. akona_foreArm_main. similar a joint name
@@ -23,130 +19,45 @@ logger.setLevel(logging.DEBUG)
 # akona_spine_chest_IK_ctr
 # akona_arm_left_foreArm_twist1_jnt
 
-class AutoRig(object):
-
+class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
     def __init__(self, chName, path):
         """
         autoRig class tools
         """
         # TODO: create node Module or chName_rig_grp transform node with messages attributes to store connections
-        self.chName = chName
-        self.path = path
-        self.joints = {}  # store joints
+        self.joints = {}  # store joints, I need this?
         self.ikControllers = {}
         self.fkControllers = {}
-        self.ikHandles = {}
 
-        # create necessary groups
-        # check if noXform exist
-        try:
-            self.noXformGrp = pm.PyNode('%s_noXform_grp' % self.chName)
-        except:
-            self.noXformGrp = pm.group(name='%s_noXform_grp' % self.chName, empty=True)
-            self.noXformGrp.inheritsTransform.set(False)
-            pm.PyNode('%s_rig_grp' % self.chName).addChild(self.noXformGrp)
-
-        # check if ctr_grp exist
-        try:
-            self.ctrGrp = pm.PyNode('%s_ctr_grp' % self.chName)
-        except:
-            self.ctrGrp = pm.group(name='%s_ctr_grp' % self.chName, empty=True)
-            pm.PyNode('%s_rig_grp' % self.chName).addChild(self.ctrGrp)
+        # super class init
+        super(ARAutoRig_Body, self).__init__(chName, path)
 
         # create Main ctr
         try:
-            self.mainCtr = pm.PyNode('%s_main_ctr' % self.chName)
+            self.mainCtr = pm.PyNode('main_ctr')
             self.ctrGrp.addChild(self.mainCtr)
         except:
-            self.mainCtr = self.create_controller('%s_main_ctr' % self.chName, 'main', 1, 18)
+            self.mainCtr = self.create_controller('main_ctr', 'main', 1, 18)
             self.ctrGrp.addChild(self.mainCtr)
+
         # connect main scale to grp joints
-        ARC.DGUtils.connectAttributes(self.mainCtr, pm.PyNode('%s_joints_grp' % self.chName), ['scale'], ['X', 'Y', 'Z'])
-
-        # I think i don't need this
-        self.methodNames = [x[0] for x in inspect.getmembers(self, predicate=inspect.ismethod) if 'auto' in x[0]]
-
-
-    # method decorator, check if already exist the rig part,
-    # and create the necessary attr circuity (nodes with controllers connections)
-    class checker_auto(object):
-        def __init__(self, decorated):
-            # TODO: do not understand why i need to make this
-            self._decorated = decorated
-
-        def __call__(self, func):
-            # store func name
-            # here we have the zone defined
-            funcName = func.__name__.replace('_auto', '')
-            # start wrapper
-            def wrapper(*args, **kwargs):
-                # check if node exist
-                # check if side is in args
-                chName = args[0].chName  # explanation: acces outher class attributes
-                sideCheck = 'left' if 'left' in args else 'right' if 'right' in args else None
-                sideCheck = kwargs['side'] if 'side' in kwargs else sideCheck
-
-                moduleSide = '%s_module' % sideCheck if sideCheck else 'module'
-                nodeName = '%s_%s_%s' % (chName, funcName, moduleSide)  # name of the desired node
-                # check if module allready exists
-                try:
-                    moduleNode = pm.PyNode(nodeName)
-                except:
-                    moduleNode = None
-
-                if moduleNode:
-                    logger.debug('%s %s module exist yet' % (nodeName))
-                    return None
-
-                # if module does not exist, run method
-                # also get info to construct the necessary nodes
-                totalControlList = func(*args, **kwargs)
-
-                # create unknown node
-                connectionTypes = ['ikControllers', 'fkControllers']
-                moduleNode = pm.createNode('script', name=nodeName)
-                pm.addAttr(moduleNode, ln='module', sn='module', attributeType='message')
-                for connection in connectionTypes:
-                    pm.addAttr(moduleNode, ln=connection, sn=connection,  attributeType='message')
-
-                for i, ctrType in enumerate(connectionTypes):
-                    for ctr in totalControlList[i]:
-                        pm.addAttr(ctr, ln='module', sn='module', attributeType='message')
-                        moduleNode.attr(ctrType).connect(ctr.module)
-
-                # connect to parent module
-                # if not exist yet, create
-                try:
-                    chModule = pm.PyNode('%s' % chName)
-                except:
-                    raise ValueError('Do not found %s elements' % chName)
-
-                # check connections
-                if not chModule.hasAttr(funcName):
-                    pm.addAttr(chModule, ln=funcName, sn=funcName, attributeType='message')
-
-                chModule.attr(funcName).connect(moduleNode.module)
-
-
-                return totalControlList
-
-            return wrapper
+        ARC.DGUtils.connectAttributes(self.mainCtr, pm.PyNode('joints_grp'), ['scale'], ['X', 'Y', 'Z'])
 
 
     # TODO: zone var in names
-    #@checker_auto('decorated')
     def spine_auto(self, zone='spine', *funcs):
         """
             Auto create a character spine
         """
+        baseName = zone
         # detect spine joints and their positions
-        spineJoints = [point for point in pm.ls() if re.match('^%s.*%s.*skin_joint$' % (self.chName, zone), str(point))]
+        spineJoints = [point for point in pm.ls() if re.match('^%s.*%s$' % (zone, self._skinJointNaming), str(point))]
         positions = [point.getTranslation(space='world') for point in spineJoints]
         logger.debug('Spine joints: %s' % spineJoints)
 
-        spineCurveTransform = pm.curve(ep=positions, name='%s_%s_1_crv' % (self.chName, zone))
+        spineCurveTransform = pm.curve(ep=positions, name='%s_1_crv' % baseName)
         # parent to nXform grp
-        noXformSpineGrp = pm.group(empty=True, name='%s_noXform_%s_grp' % (self.chName, zone))
+        noXformSpineGrp = pm.group(empty=True, name='noXform_%s_grp' % baseName)
         noXformSpineGrp.inheritsTransform.set(False)
         self.noXformGrp.addChild(noXformSpineGrp)
         noXformSpineGrp.addChild(spineCurveTransform)
@@ -163,32 +74,32 @@ class AutoRig(object):
         #TODO: nameController variable
         # create locators and connect to curve CV's
         spineDrvList = []
-        self.spineIKControllerList = []
+        self._spineIKControllerList = []
         spineFKControllerList = []
         for n, point in enumerate(spineCurve.getCVs()):
             ctrType = 'hips' if n == 0 else 'chest' if n == spineCurve.numCVs() - 1 else 'spine%s' % n
             # create grp to manipulate the curve
-            spineDriver = pm.group(name='%s_Curve_%s_%s_drv' % (self.chName, zone, ctrType), empty=True)
+            spineDriver = pm.group(name='%s_%s_Curve_drv' % (baseName, ctrType), empty=True)
             spineDriver.setTranslation(point)
-            decomposeMatrix = pm.createNode('decomposeMatrix', name='%s_%s_%s_decomposeMatrix' % (self.chName, zone, ctrType))
+            decomposeMatrix = pm.createNode('decomposeMatrix', name='%s_%s_decomposeMatrix' % (baseName, ctrType))
             spineDriver.worldMatrix[0].connect(decomposeMatrix.inputMatrix)
             decomposeMatrix.outputTranslate.connect(spineCurve.controlPoints[n])
             spineDrvList.append(spineDriver)
 
             # create controller and parent locator
-            spineController = self.create_controller('%s_%s_%s_1_ik_ctr' % (self.chName, zone, ctrType), '%sIk' % ctrType, 1, 17)
+            spineController = self.create_controller('%s_%s_1_ik_ctr' % (baseName, ctrType), '%sIk' % ctrType, 1, 17)
             logger.debug('spine controller: %s' % spineController)
 
             spineController.setTranslation(point)
 
             spineController.addChild(spineDriver)
-            self.spineIKControllerList.append(spineController)
+            self._spineIKControllerList.append(spineController)
 
             # create FK controllers
             if n < 3:
                 # first fk controller bigger
                 fkCtrSize = 1.5 if len(spineFKControllerList) == 0 else 1
-                spineFKController = self.create_controller('%s_%s_%s_fk_ctr' % (self.chName, zone, n + 1), 'hipsFk', fkCtrSize, 4)
+                spineFKController = self.create_controller('%s_%s_fk_ctr' % (baseName, n + 1), 'hipsFk', fkCtrSize, 4)
                 spineFKController.setTranslation(point)
                 spineFKControllerList.append(spineFKController)
 
@@ -199,20 +110,20 @@ class AutoRig(object):
 
             # configure ctr hierarchy, valid for 5 ctrllers
             if n == 1:
-                self.spineIKControllerList[0].addChild(spineController)
-                spineFKControllerList[0].addChild(self.spineIKControllerList[0])
+                self._spineIKControllerList[0].addChild(spineController)
+                spineFKControllerList[0].addChild(self._spineIKControllerList[0])
             # last iteration
             elif n == (spineCurve.numCVs()-1):
-                spineController.addChild(self.spineIKControllerList[-2])
+                spineController.addChild(self._spineIKControllerList[-2])
                 spineFKControllerList[-1].addChild(spineController)
 
                 # add 3th ik controller to hierarchy too
-                spineFKControllerList[1].addChild(self.spineIKControllerList[2])
+                spineFKControllerList[1].addChild(self._spineIKControllerList[2])
                 self.mainCtr.addChild(spineFKControllerList[0])
 
         # create roots grp
         ARC.createRoots(spineFKControllerList)
-        spineControllerRootsList = ARC.createRoots(self.spineIKControllerList)
+        spineControllerRootsList = ARC.createRoots(self._spineIKControllerList)
 
         # create points on curve that will drive the joints
         # this is like the main joint.
@@ -238,9 +149,9 @@ class AutoRig(object):
 
             # create empty grp and connect nodes
             jointNameSplit = str(joint).split('_')[1]
-            jointDriverGrp = pm.group(empty=True, name='%s_drv_%s_%s_%s_drv' % (self.chName, zone, jointNameSplit, n+1))
+            jointDriverGrp = pm.group(empty=True, name='%s_%s_drv%s_drv' % (baseName, jointNameSplit, n+1))
             # jointDriverGrp = pm.spaceLocator(name='%s_target' % str(joint))
-            pointOnCurveInfo = pm.createNode('pointOnCurveInfo', name='%s_drv_%s_%s_%s_positionOnCurveInfo' % (self.chName, zone, jointNameSplit, n+1))
+            pointOnCurveInfo = pm.createNode('pointOnCurveInfo', name='%s_%s_drv%s_positionOnCurveInfo' % (baseName, jointNameSplit, n+1))
             spineCurve.worldSpace[0].connect(pointOnCurveInfo.inputCurve)
             pointOnCurveInfo.parameter.set(param)
             pointOnCurveInfo.position.connect(jointDriverGrp.translate)
@@ -252,7 +163,7 @@ class AutoRig(object):
             objUpVectorIndex = -1
             # up vector transforms, useful for later aimContraint
             if not n ==len(spineJoints)-1:
-                ObjectUpVector = pm.group(empty=True, name='%s_drv_%s_%s_%s_upVector' % (self.chName,zone,jointNameSplit, n+1))
+                ObjectUpVector = pm.group(empty=True, name='%s_%s_drv%s_upVector' % (baseName, jointNameSplit, n+1))
                 # ObjectUpVector = pm.spaceLocator(name='%s_upVector' % str(joint))
                 ObjectUpVector.setTranslation(jointDriverGrp.getTranslation() + pm.datatypes.Vector(0, 0, -20), 'world')
                 noXformSpineGrp.addChild(ObjectUpVector)
@@ -262,13 +173,13 @@ class AutoRig(object):
             # AimConstraint locators, each locator aim to the upper locator
             if n == 0:
                 # parent first ObjectUpVector, to hips controller
-                self.spineIKControllerList[0].addChild(ObjectUpVector)
+                self._spineIKControllerList[0].addChild(ObjectUpVector)
             else:
                 aimConstraint = pm.aimConstraint(self.jointDriverList[-1], self.jointDriverList[-2], aimVector=(1,0,0), upVector=(0,1,0), worldUpType='object', worldUpObject=ObjectUpVectorList[objUpVectorIndex])
 
 
         # parent last target transform, to chest
-        self.spineIKControllerList[-1].addChild(ObjectUpVectorList[-1])
+        self._spineIKControllerList[-1].addChild(ObjectUpVectorList[-1])
 
         # objectUpVector conections, by pointContraint
         totalDistance = ObjectUpVectorList[-1].getTranslation('world') - ObjectUpVectorList[0].getTranslation('world')
@@ -286,7 +197,8 @@ class AutoRig(object):
             distance = distance.length()
             pointConstraintFactor = distance/totalDistance
 
-            pointContraint = pm.pointConstraint(ObjectUpVectorList[-1], ObjectUpVectorList[0], upVectorObject, maintainOffset=False, name='%s_drv_%s_%s_upVector_pointConstraint' % (self.chName,zone,jointNameSplit))
+            pointContraint = pm.pointConstraint(ObjectUpVectorList[-1], ObjectUpVectorList[0], upVectorObject, maintainOffset=False,
+                                                name='%s_%s_drv_upVector_pointConstraint' % (baseName, jointNameSplit))
             pointContraint.attr('%sW0' % str(ObjectUpVectorList[-1])).set(pointConstraintFactor)
             pointContraint.attr('%sW1' % str(ObjectUpVectorList[0])).set(1-pointConstraintFactor)
 
@@ -301,26 +213,26 @@ class AutoRig(object):
             if re.match('.*(end|hips).*', str(joint)):
                 # last joint and first joint connect to controller
                 # if hips, use de min val, zero. when end, n will be bigger than ik controllers, so use  the last ik controller.
-                spineIkCtrConstr = self.spineIKControllerList[min(n, len(self.spineIKControllerList)-1)]
+                spineIkCtrConstr = self._spineIKControllerList[min(n, len(self._spineIKControllerList) - 1)]
                 spineIkCtrConstr.rename(str(joint).replace('joint', 'ctr').replace('skin','main'))  # rename ctr, useful for snap proxy model
                 # constraint
-                pm.pointConstraint(self.jointDriverList[n], joint, maintainOffset=False,  name='%s_drv_%s_%s_1_pointConstraint' % (self.chName, zone, jointNameSplit))
-                endJointOrientConstraint = pm.orientConstraint(self.spineIKControllerList[min(n, len(self.spineIKControllerList)-1)], joint, maintainOffset=True, name='%s_drv_%s_%s_1_orientConstraint' % (self.chName, zone, jointNameSplit))
+                pm.pointConstraint(self.jointDriverList[n], joint, maintainOffset=False,  name='%s_%s_drv1_pointConstraint' % (baseName, jointNameSplit))
+                endJointOrientConstraint = pm.orientConstraint(self._spineIKControllerList[min(n, len(self._spineIKControllerList) - 1)], joint, maintainOffset=True, name='%s_%s_drv1_orientConstraint' % (baseName, jointNameSplit))
                 endJointOrientConstraint.interpType.set(0)
 
             else:
                 # connect to deform joints
                 self.jointDriverList[n].rename(str(joint).replace('skin', 'main'))  # rename driver, useful for snap proxy model
-                pm.parentConstraint(self.jointDriverList[n], joint, maintainOffset=True, name='%s_drv_%s_%s_1_parentConstraint' % (self.chName, zone, jointNameSplit))
+                pm.parentConstraint(self.jointDriverList[n], joint, maintainOffset=True, name='%s_%s_drv1_parentConstraint' % (baseName, jointNameSplit))
 
         # stretch
-        ARH.stretchCurveVolume(spineCurve, spineJoints, '%s_%s' % (self.chName, zone), self.mainCtr)
+        ARH.stretchCurveVolume(spineCurve, spineJoints, baseName, self.mainCtr)
 
         # lock and hide attributes
-        ARC.lockAndHideAttr(self.spineIKControllerList[1:-1], False, True, True)  # ik Ctr, no hips and chest
+        ARC.lockAndHideAttr(self._spineIKControllerList[1:-1], False, True, True)  # ik Ctr, no hips and chest
         ARC.lockAndHideAttr(spineFKControllerList[1:], True, False, True)  # fk controller list, no hips
         ARC.lockAndHideAttr(spineFKControllerList[0], False, False, True)  # fk controller hips
-        ARC.lockAndHideAttr([self.spineIKControllerList[0], self.spineIKControllerList[-1]], False, False, True)  # ik Ctr, hips and chest
+        ARC.lockAndHideAttr([self._spineIKControllerList[0], self._spineIKControllerList[-1]], False, False, True)  # ik Ctr, hips and chest
 
         # function for create extra content
         for func in funcs:
@@ -330,9 +242,11 @@ class AutoRig(object):
 
         # save data
         self.joints[zone] = spineJoints
-        self.ikControllers[zone] = self.spineIKControllerList
+        self.ikControllers[zone] = self._spineIKControllerList
         self.fkControllers[zone] = spineFKControllerList
-        return self.spineIKControllerList, spineFKControllerList
+
+        return self._spineIKControllerList, spineFKControllerList
+
 
     def neckHead_auto(self, zone='neckHead', *funcs):
         """
@@ -341,15 +255,16 @@ class AutoRig(object):
         :param funcs:
         :return:
         """
-        self.lastZone=zone
+        self._lastZone=zone
+        baseName = zone
         # store joints, not end joint
-        neckHeadJoints = [point for point in pm.ls() if re.match('^%s.%s.*skin_joint$' % (self.chName, zone), str(point))]
+        neckHeadJoints = [point for point in pm.ls() if re.match('^%s.*%s$' % (zone, self._skinJointNaming), str(point))]
         logger.debug('Neck head joints: %s' % neckHeadJoints)
-        positions = [point.getTranslation(space='world') for point in neckHeadJoints[:-1]]
+        positions = [point.getTranslation(space='world') for point in neckHeadJoints[:-1]]  # no tip joint
 
-        neckHeadCurveTransform = pm.curve(ep=positions, name='%s_%s1_crv' % (self.chName, zone))
+        neckHeadCurveTransform = pm.curve(ep=positions, name='%s1_crv' % baseName)
         # parent to noXform grp
-        noXformNeckHeadGrp = pm.group(empty=True, name='%s_%s_noXform_grp' % (self.chName, zone))
+        noXformNeckHeadGrp = pm.group(empty=True, name='%s_noXform_grp' % baseName)
         noXformNeckHeadGrp.inheritsTransform.set(False)
         self.noXformGrp.addChild(noXformNeckHeadGrp)
         noXformNeckHeadGrp.addChild(neckHeadCurveTransform)
@@ -367,10 +282,10 @@ class AutoRig(object):
 
         for n, point in enumerate(neckHeadCurve.getCVs()):
             # create drivers to manipulate the curve
-            neckHeadDriver = pm.group(name='%s_%s_%s_curve_drv' % (self.chName, zone, n+1), empty=True)
+            neckHeadDriver = pm.group(name='%s_%s_curve_drv' % (baseName, n+1), empty=True)
             neckHeadDriver.setTranslation(point)
             # use the worldMatrix
-            decomposeMatrix = pm.createNode('decomposeMatrix', name='%s_%s_%s_decomposeMatrix' % (self.chName,zone, n+1))
+            decomposeMatrix = pm.createNode('decomposeMatrix', name='%s_%s_decomposeMatrix' % (baseName, n+1))
             neckHeadDriver.worldMatrix[0].connect(decomposeMatrix.inputMatrix)
             decomposeMatrix.outputTranslate.connect(neckHeadCurve.controlPoints[n])
             # set last ik spine controller as parent
@@ -382,7 +297,7 @@ class AutoRig(object):
             if n > 1 and not n == neckHeadCurve.numCVs()-2:
                 # create controller and parent drivers to controllers
                 ctrType = 'neck' if not len(self.neckHeadIKCtrList) else 'head'
-                neckHeadIKCtr = self.create_controller('%s_%s_%s_ik_ctr' % (self.chName, zone, ctrType), '%sIk' % ctrType, 1, 17)
+                neckHeadIKCtr = self.create_controller('%s_%s_ik_ctr' % (baseName, ctrType), '%sIk' % ctrType, 1, 17)
                 logger.debug('neckHead controller: %s' % neckHeadIKCtr)
 
                 if n == neckHeadCurve.numCVs() - 1:  # las iteration
@@ -396,11 +311,11 @@ class AutoRig(object):
 
                 # create FK controllers, only with the first ik controller
                 if len(self.neckHeadIKCtrList) == 1:
-                    neckHeadFKCtr = self.create_controller('%s_%s_%s1_fk_ctr' % (self.chName, zone, ctrType), 'neckFk1',1,4)
+                    neckHeadFKCtr = self.create_controller('%s_%s1_fk_ctr' % (baseName, ctrType), 'neckFk1',1,4)
                     neckHeadFKCtr.setTranslation(neckHeadJoints[0].getTranslation('world'), 'world')
                     neckHeadFKCtrList.append(neckHeadFKCtr)
 
-                    neckHeadFKCtr2 = self.create_controller('%s_%s_%s2_fk_ctr' % (self.chName, zone, ctrType), 'neckFk', 1, 4)
+                    neckHeadFKCtr2 = self.create_controller('%s_%s2_fk_ctr' % (baseName, ctrType), 'neckFk', 1, 4)
                     neckHeadFKCtr2.setTranslation(neckHeadJoints[1].getTranslation('world'), 'world')
                     neckHeadFKCtrList.append(neckHeadFKCtr2)
                     # create hierarchy
@@ -418,7 +333,7 @@ class AutoRig(object):
         #self.ikControllers['spine'][-1].addChild(self.neckHeadIKCtrList[0])  # ik controller child of last spine controller
         self.neckHeadIKCtrList[0].addChild(neckHeadDrvList[1])
         # rename head control
-        self.neckHeadIKCtrList[-1].rename('%s_%s_head_1_IK_ctr' % (self.chName, zone))  # review: better here or above?
+        self.neckHeadIKCtrList[-1].rename('%s_head_1_IK_ctr' % (baseName))  # review: better here or above?
         # Fk parent to last ik spine controller
         self.ikControllers['spine'][-1].addChild(neckHeadFKCtrList[0])
 
@@ -428,17 +343,17 @@ class AutoRig(object):
 
         # head orient auto, isolate
         # head orient neck grp
-        neckOrientAuto = pm.group(empty=True, name='%s_orientAuto_%s_head_1_grp' % (self.chName, zone))
+        neckOrientAuto = pm.group(empty=True, name='%s_head_orientAuto_1_grp' % baseName)
         neckOrientAuto.setTranslation(self.neckHeadIKCtrList[-1].getTranslation('world'), 'world')
         neckHeadFKCtrList[-1].addChild(neckOrientAuto)
 
-        headIkAutoGrp = pm.group(empty=True, name='%s_orientAuto_%s_head_ikAuto_1_grp' % (self.chName, zone))
+        headIkAutoGrp = pm.group(empty=True, name='%s_head_orientAuto_ikAuto_1_grp' % baseName)
         headIkAutoGrp.setTranslation(self.neckHeadIKCtrList[-1].getTranslation('world'), 'world')
         neckHeadFKCtrList[-1].addChild(headIkAutoGrp)
         headIkAutoGrp.addChild(neckHeadIKCtrRoots[-1])
 
         # head orient base grp
-        baseOrientAuto = pm.group(empty=True, name='%s_orientAuto_%s_head_base_1_grp' % (self.chName, zone))
+        baseOrientAuto = pm.group(empty=True, name='%s_orientAuto_head_base_1_grp' % baseName)
         baseOrientAuto.setTranslation(neckOrientAuto.getTranslation('world'), 'world')
         self.mainCtr.addChild(baseOrientAuto)
 
@@ -449,15 +364,17 @@ class AutoRig(object):
                    maxValue=1.0, type='float', defaultValue=0.0, k=True)
 
         # constraint head controller offset to orient auto grps
-        autoOrientConstraint = pm.orientConstraint(baseOrientAuto, neckOrientAuto, headIkAutoGrp, maintainOffset=False, name='%s_autoOrient_%s_head_1_orientConstraint' % (self.chName, zone))
-        autoPointConstraint = pm.pointConstraint(baseOrientAuto, neckOrientAuto, headIkAutoGrp, maintainOffset=False, name='%s_autoOrient_%s_head_1_pointConstraint' % (self.chName, zone))
+        autoOrientConstraint = pm.orientConstraint(baseOrientAuto, neckOrientAuto, headIkAutoGrp, maintainOffset=False,
+                                                   name='%s_head_autoOrient_1_orientConstraint' % baseName)
+        autoPointConstraint = pm.pointConstraint(baseOrientAuto, neckOrientAuto, headIkAutoGrp, maintainOffset=False,
+                                                 name='%s_head_autoOrient_1_pointConstraint' % baseName)
 
         # create Nodes and connect
         self.neckHeadIKCtrList[-1].isolateOrient.connect(autoOrientConstraint.attr('%sW0' % str(baseOrientAuto)))
         self.neckHeadIKCtrList[-1].isolatePoint.connect(autoPointConstraint.attr('%sW0' % str(baseOrientAuto)))
 
-        plusMinusAverageOrient = pm.createNode('plusMinusAverage', name='%s_orientAuto_%s_head_isolateOrient_1_plusMinusAverage' % (self.chName, zone))
-        plusMinusAveragepoint = pm.createNode('plusMinusAverage', name='%s_pointAuto_%s_head_isolateOrient_1_plusMinusAverage' % (self.chName, zone))
+        plusMinusAverageOrient = pm.createNode('plusMinusAverage', name='%s_head_orientAuto_isolateOrient_1_PMA' % baseName)
+        plusMinusAveragepoint = pm.createNode('plusMinusAverage', name='%s_head_pointAuto_isolateOrient_1_PMA' % baseName)
         self.neckHeadIKCtrList[-1].isolateOrient.connect(plusMinusAverageOrient.input1D[1])
         self.neckHeadIKCtrList[-1].isolatePoint.connect(plusMinusAveragepoint.input1D[1])
 
@@ -493,10 +410,10 @@ class AutoRig(object):
             except:
                 param = 1.0
             # create empty grp and connect nodes
-            jointNameSplit = str(joint).split('_')[1]
-            jointDriverGrp = pm.group(empty=True, name='%s_drv_%s_%s_%s_drv' % (self.chName, zone, jointNameSplit, n+1))
+            jntNameSplt = str(joint).split('_')[1]
+            jointDriverGrp = pm.group(empty=True, name='%s_%s_drv%s_drv' % (baseName, jntNameSplt, n+1))
             # jointDriverGrp = pm.spaceLocator(name='%s_target' % str(joint))
-            pointOnCurveInfo = pm.createNode('pointOnCurveInfo', name='%s_drv_%s_%s_%s_positionOnCurveInfo' % (self.chName, zone, jointNameSplit, n+1))
+            pointOnCurveInfo = pm.createNode('pointOnCurveInfo', name='%s_%s_drv%s_positionOnCurveInfo' % (baseName, jntNameSplt, n+1))
             neckHeadCurve.worldSpace[0].connect(pointOnCurveInfo.inputCurve)
             pointOnCurveInfo.parameter.set(param)
             pointOnCurveInfo.position.connect(jointDriverGrp.translate)
@@ -533,7 +450,7 @@ class AutoRig(object):
             pointConstraintFactor = distance / totalDistance
 
             pointContraint = pm.pointConstraint(ObjectUpVectorList[-1], ObjectUpVectorList[0], upVectorObject,
-                                                maintainOffset=False, name='%s_drv_%s_%s_upVector_pointConstraint' % (self.chName, zone, jointNameSplit))
+                                                maintainOffset=False, name='%s_%s_upVector_drv_pointConstraint' % (baseName, jntNameSplt))
             pointContraint.attr('%sW0' % str(ObjectUpVectorList[-1])).set(pointConstraintFactor)
             pointContraint.attr('%sW1' % str(ObjectUpVectorList[0])).set(1 - pointConstraintFactor)
 
@@ -545,24 +462,24 @@ class AutoRig(object):
             if 'Tip' in str(joint):
                 continue
 
-            jointNameSplit = str(joint).split('_')[1]
+            jntNameSplt = str(joint).split('_')[1]
             # Constraint for the head zone
             # be careful with naming, this should be more procedural
             if '_head' in str(joint):
                 # head joint, with point to driver, and orient to controller
-                pm.pointConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=False, name='%s_%s_%s_1_drv_pointConstraint' % (self.chName, zone, jointNameSplit))
+                pm.pointConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=False, name='%s_%s_1_drv_pointConstraint' % (baseName, jntNameSplt))
                 # orient to controller
                 self.neckHeadIKCtrList[-1].rename(str(joint).replace('skin', 'ctr'))  # rename, useful for snap proxy model
-                pm.orientConstraint(self.neckHeadIKCtrList[-1], joint, maintainOffset=True, name='%s_%s_%s_1_drv_orientConstraint' % (self.chName, zone, jointNameSplit))
+                pm.orientConstraint(self.neckHeadIKCtrList[-1], joint, maintainOffset=True, name='%s_%s_1_drv_orientConstraint' % (baseName, jntNameSplt))
                 # connect scales
                 ARC.DGUtils.connectAttributes(self.neckHeadIKCtrList[-1], joint, ['scale'], 'XYZ')
 
             else:
                 self.neckHeadJointDriverList[n].rename(str(joint).replace('skin', 'main'))  # rename, useful for snap proxy model
-                pm.parentConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=True, name='%s_%s_%s_1_drv_parentConstraint' % (self.chName, zone, jointNameSplit))
+                pm.parentConstraint(self.neckHeadJointDriverList[n], joint, maintainOffset=True, name='%s_%s_1_drv_parentConstraint' % (baseName, jntNameSplt))
 
         # stretch
-        ARH.stretchCurveVolume(neckHeadCurve, neckHeadJoints[:-1], '%s_%s' % (self.chName, zone), self.mainCtr)
+        ARH.stretchCurveVolume(neckHeadCurve, neckHeadJoints[:-1], baseName, self.mainCtr)
 
         # freeze and hide attributes.
         ARC.lockAndHideAttr(neckHeadFKCtrList, False, False, True)
@@ -579,9 +496,10 @@ class AutoRig(object):
         self.joints[zone] = neckHeadJoints
         self.ikControllers[zone] = self.neckHeadIKCtrList
         self.fkControllers[zone] = neckHeadFKCtrList
+
         return self.neckHeadIKCtrList, neckHeadFKCtrList
 
-    #TODO: rename method ikFkChain_auto
+
     def ikFkChain_auto(self, side, parent, zone='leg', stretch=True, bendingBones=False, *funcs):
         """
         # TODO: organize and optimize this method
@@ -593,57 +511,63 @@ class AutoRig(object):
             restPoints(list):  with rest points
             bendingBones(bool): add a control per twist joint
         """
+        baseName = "%s_%s" % (zone, side)
+        twistName = "twist"
+
         zoneA = zone
-        self.lastZone = zone  # review
-        self.lastSide = side  # review
+        self._lastZone = zone
+        self._lastSide = side
         fkColor = 14 if side == 'left' else 29
+
         # be careful with poseInterpolator
-        ikFkJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s_.*?_(skin_joint)$' % (self.chName, zoneA, side), str(point).lower()) and not 'twist' in str(point)]
-        self.ikFkTwistJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*(twist).*(skin_joint)$' % (self.chName, zoneA, side), str(point).lower())]
+        # try a finder with the API
+        ikFkJoints = [point for point in pm.ls() if re.match('^%s.*%s_.*?_(skin_joint)$' % (zoneA, side), str(point).lower()) and not twistName in str(point)]
+        self.ikFkTwistJoints = [point for point in pm.ls() if re.match('^%s.*%s.*(twist).*(skin_joint)$' % (zoneA, side), str(point).lower())]
         logger.debug('%s %s joints: %s' % (side, zoneA, ikFkJoints))
         logger.debug('%s %s twist joints: %s' % (side, zoneA, self.ikFkTwistJoints))
 
         # group for ikFk controls
-        self.ikFkCtrGrp = pm.group(empty=True, name='%s_ik_%s_%s_ctrGrp_root' % (self.chName, zoneA, side))
+        self.ikFkCtrGrp = pm.group(empty=True, name='%s_ik_ctrGrp_root' % baseName)
         self.mainCtr.addChild(self.ikFkCtrGrp)
 
         # sync ikFkTwistJoints index with ikFk joints index
-        ikFkTwistSyncJoints = ARC.syncListsByKeyword(ikFkJoints, self.ikFkTwistJoints, 'twist')
+        ikFkTwistSyncJoints = ARC.syncListsByKeyword(ikFkJoints, self.ikFkTwistJoints, twistName)
 
         # fk controllers are copies of ikFk joints
         # save controllers name
-        self.ikFk_FkControllersList = []
-        self.ikFk_IkControllerList = []
-        self.ikFk_MainJointList = []
+        self._ikFk_FkControllersList = []
+        self._ikFk_IkControllerList = []
+        self._ikFk_MainJointList = []
         ikFkTwistList = []
-        self.ikFk_IkJointList = []
+        self._ikFk_IkJointList = []
 
         NameIdList = []  # store idNames. p.e upperLeg, lowerLeg
 
         # duplicate joints
         # todo: no i variable
         for n, joint in enumerate(ikFkJoints):
-            controllerName = str(joint).split('_')[3] if 'end' not in str(joint) else 'end'  # if is an end joint, rename end
+            controllerName = str(joint).split('_')[-3] if 'end' not in str(joint) else 'end'  # if is an end joint, rename end
             # fk controllers, last joint is an end joint, it doesn't has controller on the json controller file,
             # so tryCatch should give an error
             try:
-                fkControl = self.create_controller('%s_%s_%s_%s_fk_ctr' % (self.chName, zoneA, side, controllerName), '%sFk_%s' % (controllerName, side), 1, fkColor)
+                # review this, use a check, not a try
+                fkControl = self.create_controller('%s_%s_fk_ctr' % (baseName, controllerName), '%sFk_%s' % (controllerName, side), 1, fkColor)
                 pm.xform(fkControl, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
-                self.ikFk_FkControllersList.append(fkControl)
+                self._ikFk_FkControllersList.append(fkControl)
             except:
                 logger.debug('no controller for fk controller: %s' % joint)
                 pass
             # ik and main joints
-            self.ikFk_IkJointList.append(joint.duplicate(po=True, name='%s_%s_%s_%s_ik_joint' % (self.chName, zoneA, side, controllerName))[0])
-            self.ikFk_MainJointList.append(joint.duplicate(po=True, name='%s_%s_%s_%s_main_joint' % (self.chName, zoneA, side, controllerName))[0])
+            self._ikFk_IkJointList.append(joint.duplicate(po=True, name='%s_%s_ik_joint' % (baseName, controllerName))[0])
+            self._ikFk_MainJointList.append(joint.duplicate(po=True, name='%s_%s_main_joint' % (baseName, controllerName))[0])
 
             ### twist Joints ####
             if ikFkTwistSyncJoints[n]:
-                ikFkTwistIni = [joint.duplicate(po=True, name='%s_twist0_%s_%s_%s_joint' % (self.chName, zoneA, side, controllerName))[0]]
+                ikFkTwistIni = [joint.duplicate(po=True, name='%s_%s_%s0_joint' % (baseName, controllerName, twistName))[0]]
 
                 for j, twstJnt in enumerate(ikFkTwistSyncJoints[n]):
                     # duplicate and construc hierarchy
-                    ikFkTwistIni.append(twstJnt.duplicate(po=True, name='%s_twist%s_%s_%s_%s_joint' % (self.chName, j+1, zoneA, side, controllerName))[0])
+                    ikFkTwistIni.append(twstJnt.duplicate(po=True, name='%s_%s_%s%s_joint' % (baseName, controllerName, twistName, j+1))[0])
                     ikFkTwistIni[-2].addChild(ikFkTwistIni[-1])
 
                 ikFkTwistList.append(ikFkTwistIni)  # append to list of tJoints
@@ -653,7 +577,7 @@ class AutoRig(object):
                 if n == 0:
                     parent.addChild(ikFkTwistIni[0])  # first to ctr ik hips
                 else:
-                    self.ikFk_MainJointList[-2].addChild(ikFkTwistIni[0])  # lower twist child of upper ikFk
+                    self._ikFk_MainJointList[-2].addChild(ikFkTwistIni[0])  # lower twist child of upper ikFk
 
                 # create twist group orient tracker, if is chain before foot or hand, track foot or hand
                 if ikFkTwistSyncJoints[n] == ikFkTwistSyncJoints[-2]:  # just before end joint
@@ -662,59 +586,59 @@ class AutoRig(object):
                     self.footTwstList = list(ikFkTwistIni)
                     self.footTwstZone = zoneA
                     self.footTwstCtrName = controllerName
-                    self.footpointCnstr = self.ikFk_MainJointList[-1]
+                    self.footpointCnstr = self._ikFk_MainJointList[-1]
 
                 else:
                     # connect and setup ikFk Twist Ini chain
-                    ARH.twistJointsConnect(ikFkTwistIni, self.ikFk_MainJointList[-1], '%s_%s_%s_%s' % (self.chName, controllerName, zoneA, side))
+                    ARH.twistJointsConnect(ikFkTwistIni, self._ikFk_MainJointList[-1], '%s_%s' % (baseName, controllerName))
 
             NameIdList.append(controllerName)
 
-        logger.debug('ikFk IK joints: %s' % self.ikFk_IkJointList)
+        logger.debug('ikFk IK joints: %s' % self._ikFk_IkJointList)
 
         # reconstruct hierarchy
         # create Fk control shapes
-        for i, fkCtr in enumerate(self.ikFk_FkControllersList):  # last joint does not has shape
+        for i, fkCtr in enumerate(self._ikFk_FkControllersList):  # last joint does not has shape
             # ik hierarchy
-            self.ikFk_IkJointList[i].addChild(self.ikFk_IkJointList[i + 1])
+            self._ikFk_IkJointList[i].addChild(self._ikFk_IkJointList[i + 1])
             # main hierarchy
-            self.ikFk_MainJointList[i].addChild(self.ikFk_MainJointList[i + 1])
+            self._ikFk_MainJointList[i].addChild(self._ikFk_MainJointList[i + 1])
             # last it avoid this
             # fk controls
-            if i != len(self.ikFk_FkControllersList)-1:
-                fkCtr.addChild(self.ikFk_FkControllersList[i + 1])
+            if i != len(self._ikFk_FkControllersList)-1:
+                fkCtr.addChild(self._ikFk_FkControllersList[i + 1])
 
         # ik control
-        self.ikFk_IkControl = self.create_controller('%s_%s_%s_ik_ctr' % (self.chName, zoneA, side), '%sIk_%s' % (zoneA, side), 1, 17)
+        self.ikFk_IkControl = self.create_controller("%s_ik_ctr" % baseName, "%sIk_%s" % (zoneA, side), 1, 17)
         self.ikFk_IkControl.setTranslation(ikFkJoints[-1].getTranslation('world'), 'world')
         self.ikFkCtrGrp.addChild(self.ikFk_IkControl)  # parent to ctr group
 
         # set hierarchy
-        parent.addChild(self.ikFk_FkControllersList[0])
-        parent.addChild(self.ikFk_MainJointList[0])
-        parent.addChild(self.ikFk_IkJointList[0])
+        parent.addChild(self._ikFk_FkControllersList[0])
+        parent.addChild(self._ikFk_MainJointList[0])
+        parent.addChild(self._ikFk_IkJointList[0])
 
         # save to list
-        self.ikFk_IkControllerList.append(self.ikFk_IkControl)
-        ARC.createRoots(self.ikFk_IkControllerList)
+        self._ikFk_IkControllerList.append(self.ikFk_IkControl)
+        ARC.createRoots(self._ikFk_IkControllerList)
 
         # fkRoots
-        self.ikFk_FkCtrRoots = ARC.createRoots(self.ikFk_FkControllersList)
-        ARC.createRoots(self.ikFk_FkControllersList, 'auto')
+        self.ikFk_FkCtrRoots = ARC.createRoots(self._ikFk_FkControllersList)
+        ARC.createRoots(self._ikFk_FkControllersList, 'auto')
 
         # set preferred angle
-        self.ikFk_IkJointList[1].preferredAngleZ.set(-15)
+        self._ikFk_IkJointList[1].preferredAngleZ.set(-15)
         # ik solver
-        ikHandle, ikEffector = pm.ikHandle(startJoint=self.ikFk_IkJointList[0], endEffector=self.ikFk_IkJointList[-1], solver='ikRPsolver', name='%s_ik_%s_%s_handle' % (self.chName, zoneA, side))
-        ikEffector.rename('%s_ik_%s_%s_effector' % (self.chName, zoneA, side))
+        ikHandle, ikEffector = pm.ikHandle(startJoint=self._ikFk_IkJointList[0], endEffector=self._ikFk_IkJointList[-1], solver='ikRPsolver', name='%s_ik_handle' % baseName)
+        ikEffector.rename('%s_ik_effector' % baseName)
         self.ikFk_IkControl.addChild(ikHandle)
         # create poles
-        ikFkPoleController = self.create_controller('%s_%s_%s_pole_ik_ctr' % (self.chName, zoneA, side), 'pole',2)
-        ARC.relocatePole(ikFkPoleController, self.ikFk_IkJointList, 35)  # relocate pole Vector
+        ikFkPoleController = self.create_controller('%s_pole_ik_ctr' % baseName, "pole",2)
+        ARC.relocatePole(ikFkPoleController, self._ikFk_IkJointList, 35)  # relocate pole Vector
         self.ikFkCtrGrp.addChild(ikFkPoleController)
         pm.addAttr(ikFkPoleController, ln='polePosition', at='enum', en="world:root:foot", k=True)
         # save poleVector
-        self.ikFk_IkControllerList.append(ikFkPoleController)
+        self._ikFk_IkControllerList.append(ikFkPoleController)
 
         # constraint poleVector
         pm.poleVectorConstraint(ikFkPoleController, ikHandle)
@@ -728,10 +652,10 @@ class AutoRig(object):
         poleAttrgrp=[]
         ikFkPoleAnimNodes=[]
         for attr in ('world', 'root', zoneA):
-            ikFkPoleGrp = pm.group(empty=True, name= '%s_ik_%s_%s_pole%s_grp' % (self.chName, zoneA, attr.capitalize(), side))
+            ikFkPoleGrp = pm.group(empty=True, name="%s_%s_ik_pole_grp" % (baseName, attr.capitalize()))
             poleAttrgrp.append(ikFkPoleGrp)
             pm.xform(ikFkPoleGrp, ws=True, m=pm.xform(ikFkPoleVectorAuto, ws=True, m=True, q=True))
-            ikFkPoleAnim = pm.createNode('animCurveTU', name='%s_ik_%s_%s_pole%s_animNode' % (self.chName, zoneA, attr.capitalize(), side))
+            ikFkPoleAnim = pm.createNode('animCurveTU', name='%s_%s_ik_pole_animNode' % (baseName, attr.capitalize()))
             ikFkPoleController.attr('polePosition').connect(ikFkPoleAnim.input)
             ikFkPoleAnimNodes.append(ikFkPoleAnim)
 
@@ -759,7 +683,7 @@ class AutoRig(object):
         # main blending
         # unknown node to store blend info
         # locator shape instanced version
-        ikFkNode = pm.spaceLocator(name='%s_%s_%s_attr' % (self.chName, zoneA, side))
+        ikFkNode = pm.spaceLocator(name='%s_attr' % baseName)
         self.ikFkshape = ikFkNode.getShape()
         self.ikFkshape.visibility.set(0)
         pm.addAttr(self.ikFkshape, longName='ikFk', shortName='ikFk', minValue=0.0, maxValue=1.0, type='float', defaultValue=1.0, k=True)
@@ -768,7 +692,7 @@ class AutoRig(object):
             for axis in ('X', 'Y', 'Z'):
                 pm.setAttr('%s.%s%s' % (self.ikFkshape, attr, axis), channelBox=False, keyable=False)
 
-        self.plusMinusIkFk = pm.createNode('plusMinusAverage', name='%s_ikFk_blending_%s_%s_plusMinusAverage' % (self.chName, zoneA, side))
+        self.plusMinusIkFk = pm.createNode('plusMinusAverage', name='%s_ikFk_blending_pma' % baseName)
         self.ikFkshape.ikFk.connect(self.plusMinusIkFk.input1D[1])
         self.plusMinusIkFk.input1D[0].set(1)
         self.plusMinusIkFk.operation.set(2)
@@ -777,28 +701,28 @@ class AutoRig(object):
             ###Strech###
             # fk strech
             # review this part, it could be cool only one func
-            ikFk_MainDistances, ikFk_MaxiumDistance = ARC.calcDistances(self.ikFk_MainJointList)  # review:  legIkJointList[0]   legIkCtrRoot
+            ikFk_MainDistances, ikFk_MaxiumDistance = ARC.calcDistances(self._ikFk_MainJointList)  # review:  legIkJointList[0]   legIkCtrRoot
             #ikFkStretchSetup
-            ARH.stretchIkFkSetup(self.ikFk_FkCtrRoots[1:], ikFk_MainDistances, self.ikFkshape, [self.ikFk_IkJointList[0], ikHandle],
-                                             ikFk_MaxiumDistance, self.ikFk_IkJointList[1:], self.ikFk_MainJointList[1:], ikFkTwistList, '%s_%s_%s' % (self.chName, zoneA, side), self.mainCtr, ikFkPoleController)
+            ARH.stretchIkFkSetup(self.ikFk_FkCtrRoots[1:], ikFk_MainDistances, self.ikFkshape, [self._ikFk_IkJointList[0], ikHandle],
+                                 ikFk_MaxiumDistance, self._ikFk_IkJointList[1:], self._ikFk_MainJointList[1:], ikFkTwistList, baseName, self.mainCtr, ikFkPoleController)
 
         # iterate along main joints
         # blending
         # todo: visibility, connect to ikFkShape
         # last joint of mainJointList is a end joint, do not connect
-        for i, joint in enumerate(self.ikFk_MainJointList[:-1]):
+        for i, joint in enumerate(self._ikFk_MainJointList[:-1]):
             # attributes
-            orientConstraint = pm.orientConstraint(self.ikFk_IkJointList[i], self.ikFk_FkControllersList[i], joint, maintainOffset=False, name='%s_%s_%s_main_blending_orientConstraint' % (self.chName, zoneA, side))
-            self.ikFkshape.ikFk.connect(orientConstraint.attr('%sW0' % str(self.ikFk_IkJointList[i])))
-            self.ikFkshape.ikFk.connect(self.ikFk_IkJointList[i].visibility)
+            orientConstraint = pm.orientConstraint(self._ikFk_IkJointList[i], self._ikFk_FkControllersList[i], joint, maintainOffset=False, name='%s_main_blending_orientConstraint' % baseName)
+            self.ikFkshape.ikFk.connect(orientConstraint.attr('%sW0' % str(self._ikFk_IkJointList[i])))
+            self.ikFkshape.ikFk.connect(self._ikFk_IkJointList[i].visibility)
 
             # parent shape
-            self.ikFk_FkControllersList[i].addChild(self.ikFkshape, s=True, add=True)
+            self._ikFk_FkControllersList[i].addChild(self.ikFkshape, s=True, add=True)
 
             # conenct blendging node
-            self.plusMinusIkFk.output1D.connect(orientConstraint.attr('%sW1' % str(self.ikFk_FkControllersList[i])))
+            self.plusMinusIkFk.output1D.connect(orientConstraint.attr('%sW1' % str(self._ikFk_FkControllersList[i])))
             # review: visibility shape
-            self.plusMinusIkFk.output1D.connect(self.ikFk_FkControllersList[i].visibility)
+            self.plusMinusIkFk.output1D.connect(self._ikFk_FkControllersList[i].visibility)
 
         # twist joints bending bones connect, if curve wire detected, no use bendingJoints
         # TODO: control by twist or wire?
@@ -806,17 +730,17 @@ class AutoRig(object):
             # if twist joints, we could desire bending controls or not
             if bendingBones:
                 # todo: name args
-                ARH.twistJointBendingBoneConnect(parent, self.ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints, self.chName, zone, side, NameIdList, self.path)
+                ARH.twistJointBendingBoneConnect(parent, self._ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints, self.chName, zone, side, NameIdList, self.path)
             else:
-                ARH.twistJointConnect(self.ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints)
+                ARH.twistJointConnect(self._ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints)
 
         # or connect the rig with not twist joints
         else:
-            for i, joint in enumerate(self.ikFk_MainJointList):
+            for i, joint in enumerate(self._ikFk_MainJointList):
                 # connect to deform skeleton TODO: connect func, with rename options
                 joint.rename(str(ikFkJoints[i]).replace('skin', 'main'))  # rename, useful for snap proxy model
-                pm.orientConstraint(joint, ikFkJoints[i], maintainOffset=False, name='%s_main_%s_%s_parentConstraint' % (self.chName, zoneA, side))
-                pm.pointConstraint(joint, ikFkJoints[i], maintainOffset=False, name='%s_main_%s_%s_parentConstraint' % (self.chName, zoneA, side))
+                pm.orientConstraint(joint, ikFkJoints[i], maintainOffset=False, name='%s_main_parentConstraint' % baseName)
+                pm.pointConstraint(joint, ikFkJoints[i], maintainOffset=False, name='%s_main_parentConstraint' % baseName)
 
         # ik blending controller attr
         self.ikFkshape.ikFk.connect(ikFkPoleController.visibility)
@@ -826,44 +750,44 @@ class AutoRig(object):
         # lock and hide attributes
         # lock and hide ik ctr scale attr
         ARC.lockAndHideAttr(self.ikFk_IkControl, False, False, True)
-        ARC.lockAndHideAttr(self.ikFk_FkControllersList, True, False, True)
+        ARC.lockAndHideAttr(self._ikFk_FkControllersList, True, False, True)
         ARC.lockAndHideAttr(ikFkPoleController, False, True, True)
 
         # function for create foots or hands
         for func in funcs:
             ikControllers, fkControllers = func()
-            self.ikFk_IkControllerList = self.ikFk_IkControllerList + ikControllers
-            self.ikFk_FkControllersList = self.ikFk_FkControllersList + fkControllers
+            self._ikFk_IkControllerList = self._ikFk_IkControllerList + ikControllers
+            self._ikFk_FkControllersList = self._ikFk_FkControllersList + fkControllers
 
         # save Data
         zoneSide = '%s_%s' % (zoneA, side)
         self.joints[zoneSide] = ikFkJoints
-        self.ikControllers[zoneSide] = self.ikFk_IkControllerList
-        self.fkControllers[zoneSide] = self.ikFk_FkControllersList
-        self.ikHandles[zoneSide] = ikHandle
+        self.ikControllers[zoneSide] = self._ikFk_IkControllerList
+        self.fkControllers[zoneSide] = self._ikFk_FkControllersList
 
         # delete ikfkShape
         pm.delete(ikFkNode)
 
-        return self.ikFk_IkControllerList, self.ikFk_FkControllersList
+        return self._ikFk_IkControllerList, self._ikFk_FkControllersList
 
 
     def foot_auto(self, zones=('foot', 'toe'), planeAlign=None, *funcs):
         """
         # TODO: organize and optimize this Func
-        # TODO: get zoneA from last ikFk executed func
         This method should be called as a *arg for ikFkChain_auto.
         auto build a ik fk foot
         Args:
             side: left or right
             zone: foot
         """
+        baseNameB = "%s_%s" % (zones[0], self._lastSide)
+        baseNameLZ = "%s_%s" % (self._lastZone, self._lastSide)
         zoneB = zones[0]
         zoneC = zones[1]
-        fkColor = 14 if self.lastSide =='left' else 29
-        toesJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*%s.(?!End)(?!0)(?!twist).*skin_joint$' % (self.chName, zoneB, self.lastSide, zoneC), str(point))]
+        fkColor = 14 if self._lastSide == 'left' else 29
+        toesJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.(?!End)(?!0)(?!twist).*skin_joint$' % (zoneB, self._lastSide, zoneC), str(point))]
         #toesZeroJoints = [point for point in pm.ls() if re.match('^%s.*(%s).(?!_end)(?=0)(?!twist).*%s.*joint$' % (self.chName, zoneC, self.lastSide), str(point))]
-        footJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*skin_joint$' % (self.chName, zoneB, self.lastSide), str(point)) and not zoneC in str(point)]
+        footJoints = [point for point in pm.ls() if re.match('^%s.*%s.*skin_joint$' % (zoneB, self._lastSide), str(point)) and not zoneC in str(point)]
 
         # arrange toes by joint chain p.e [[toea, toesa_Tip], [toeb, toeb_tip]]
         toesJointsArr = ARC.arrangeListByHierarchy(toesJoints)
@@ -880,13 +804,13 @@ class AutoRig(object):
         toeControllerNameList = []
         # create foot ctr
         for joint in footJoints:
-            controllerName = str(joint).split('_')[3]
+            controllerName = str(joint).split('_')[-3]
             logger.debug('foot controller name: %s' % controllerName)
-            footFkCtr = self.create_controller('%s_%s_%s_%s_fk_ctr' % (self.chName, zoneB, self.lastSide, controllerName),
-                                               '%sFk_%s' % (controllerName, self.lastSide), 1, fkColor)
+            footFkCtr = self.create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName),
+                                               '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
             pm.xform(footFkCtr, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
-            footMain = joint.duplicate(po=True, name='%s_%s_%s_%s_main_joint' % (self.chName, zoneB, self.lastSide, controllerName))[0]
+            footMain = joint.duplicate(po=True, name='%s_%s_main_joint' % (baseNameB, controllerName))[0]
 
             # get transformMatrix and orient new controller
             matrix = pm.xform(footFkCtr, ws=True, q=True, m=True)
@@ -895,7 +819,7 @@ class AutoRig(object):
             pm.xform(footFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             # fk control Shape
-            shape = self.create_controller('%sShape' % str(footFkCtr), '%sFk_%s' % (controllerName, self.lastSide), 1, fkColor)
+            shape = self.create_controller('%sShape' % str(footFkCtr), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
             footFkCtr.addChild(shape.getShape(), s=True, r=True)
             pm.delete(shape)
 
@@ -914,18 +838,18 @@ class AutoRig(object):
 
         # parent fk controller under leg.
         # can be the posibility that we have grps to control the stretch. so we look for childs
-        fkControlChilds = self.ikFk_FkControllersList[-1].listRelatives(ad=True, type='transform')
+        fkControlChilds = self._ikFk_FkControllersList[-1].listRelatives(ad=True, type='transform')
         if fkControlChilds:
             fkControlChilds[0].addChild(footFkControllerList[0])
         else:
-            self.ikFk_FkControllersList[-1].addChild(footFkControllerList[0])
+            self._ikFk_FkControllersList[-1].addChild(footFkControllerList[0])
 
-        self.ikFk_MainJointList[-1].addChild(footMainJointsList[0])
+        self._ikFk_MainJointList[-1].addChild(footMainJointsList[0])
 
 
         # twistJointsConnections
         if self.ikFkTwistJoints:
-            ARH.twistJointsConnect(self.footTwstList, footMainJointsList[0], '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self.lastSide), self.footpointCnstr)
+            ARH.twistJointsConnect(self.footTwstList, footMainJointsList[0], '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self._lastSide), self.footpointCnstr)
 
         # TODO: function from joint, ik, fk, main?
         # create toe Fk and ik ctr
@@ -936,16 +860,16 @@ class AutoRig(object):
             toeIkChain = []
             toeMainChain = []
             for joint in toe:
-                controllerName = str(joint).split('_')[3]
+                controllerName = str(joint).split('_')[-3]
                 logger.debug('foot controller name: %s' % controllerName)
 
                 # create controllers and main
-                toeFkCtr = self.create_controller('%s_%s_%s_%s_fk_ctr' % (self.chName, zoneB, self.lastSide, controllerName), '%sFk_%s' % (controllerName, self.lastSide), 1, fkColor)
+                toeFkCtr = self.create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
                 pm.xform(toeFkCtr, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
-                toeMainJnt = joint.duplicate(po=True, name='%s_%s_%s_%s_main_joint' % (self.chName, zoneB, self.lastSide, controllerName))[0]
+                toeMainJnt = joint.duplicate(po=True, name='%s_%s_main_joint' % (baseNameB, controllerName))[0]
 
-                toeIkCtr = self.create_controller('%s_%s_%s_%s_ik_ctr' % (self.chName, zoneB, self.lastSide, controllerName), '%sFk_%s' % (controllerName, self.lastSide), 1, fkColor)
+                toeIkCtr = self.create_controller('%s_%s_ik_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
                 pm.xform(toeIkCtr, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
                 # if joint Chain (not the first controller created), reconstruct hierarchy
@@ -978,7 +902,7 @@ class AutoRig(object):
             footMainJointsList[-1].addChild(toeMainChain[0])
 
         # ik foot ctr TODO: simplify this section
-        footIkCtr = self.create_controller('%s_%s_%s_foot_ik_ctr' % (self.chName, zoneB, self.lastSide), '%sIk_%s' % (zoneB, self.lastSide), 1, 17)
+        footIkCtr = self.create_controller('%s_foot_ik_ctr' % baseNameB, '%sIk_%s' % (zoneB, self._lastSide), 1, 17)
         self.ikFkCtrGrp.addChild(footIkCtr)
         footIkControllerList.append(footIkCtr)  # append joint to list
         for toeCtr in toeIkCtrParents:
@@ -998,12 +922,12 @@ class AutoRig(object):
         for ctrType in footIkAttrTypes[:-1]:
             if ctrType == 'tilt':
                 for inOut in ('In', 'Out'):
-                    footIkCtrWalk = self.create_controller('%s_%s_%s_foot%s%s_ik_ctr' % (self.chName, zoneB, self.lastSide, ctrType.capitalize(), inOut),'foot%s%sIk_%s' % (ctrType.capitalize(),inOut, self.lastSide), 1, 17)
+                    footIkCtrWalk = self.create_controller('%s_foot%s%s_ik_ctr' % (baseNameB, ctrType.capitalize(), inOut), 'foot%s%sIk_%s' % (ctrType.capitalize(), inOut, self._lastSide), 1, 17)
                     footIkControllerList[-1].addChild(footIkCtrWalk)
                     footIkCtr.attr('showControls').connect(footIkCtrWalk.getShape().visibility)
                     footIkControllerList.append(footIkCtrWalk)
             else:
-                footIkCtrWalk = self.create_controller('%s_%s_%s_foot%s_ik_ctr' % (self.chName, zoneB, self.lastSide, ctrType.capitalize()), 'foot%sIk_%s' % (ctrType.capitalize(), self.lastSide), 1, 17)
+                footIkCtrWalk = self.create_controller('%s_foot%s_ik_ctr' % (baseNameB, ctrType.capitalize()), 'foot%sIk_%s' % (ctrType.capitalize(), self._lastSide), 1, 17)
                 footIkControllerList[-1].addChild(footIkCtrWalk)
                 footIkCtr.attr('showControls').connect(footIkCtrWalk.getShape().visibility)
                 footFootRollCtr.append(footIkCtrWalk)  # save footRoll controllers
@@ -1035,12 +959,12 @@ class AutoRig(object):
             footBallIkCtr.addChild(i)
 
         pm.delete(self.ikFk_IkControl.firstParent())  # if foot, we do not need this controller
-        self.ikFk_IkControllerList.remove(self.ikFk_IkControl)
+        self._ikFk_IkControllerList.remove(self.ikFk_IkControl)
 
         # toes general Controller ik Fk review: no side review: ik ctrllers  simplyfy with for
-        toeFkGeneralController = self.create_controller('%s_%s_%s_toeGeneral_fk_ctr' % (self.chName, zoneB, self.lastSide), 'toesFk', 1, fkColor)
+        toeFkGeneralController = self.create_controller('%s_toeGeneral_fk_ctr' % baseNameB, 'toesFk', 1, fkColor)
         pm.xform(toeFkGeneralController, ws=True, m=middleToeCtrMatrix)  # align to middle individual toe review
-        toeIkGeneralController = self.create_controller('%s_%s_%s_toeGeneral_ik_ctr' % (self.chName, zoneB, self.lastSide), 'toesFk', 1, fkColor)
+        toeIkGeneralController = self.create_controller('%s_toeGeneral_ik_ctr' % baseNameB, 'toesFk', 1, fkColor)
         pm.xform(toeIkGeneralController, ws=True, m=middleToeCtrMatrix)
         # parent and store to lists
         footFkControllerList[-1].addChild(toeFkGeneralController)
@@ -1134,7 +1058,8 @@ class AutoRig(object):
             controllerName = footControllerNameList[i]
             if i == 0:
                 # connect ik fk blend system, in a leg system only have one ik controller
-                orientConstraint = pm.orientConstraint(footIkControllerList[-1], footFkControllerList[i], mainJoint, maintainOffset=True, name='%s_%s_%s_%s_mainBlending_orientConstraint' % (self.chName, controllerName, zoneB, self.lastSide))
+                orientConstraint = pm.orientConstraint(footIkControllerList[-1], footFkControllerList[i], mainJoint, maintainOffset=True,
+                                                       name='%s_%s_mainBlending_orientConstraint' % (baseNameB, controllerName))
                 self.ikFkshape.ikFk.connect(orientConstraint.attr('%sW0' % str(footIkControllerList[-1])))  # shape with bleeding attribute
                 self.ikFkshape.ikFk.connect(footIkControllerList[i].visibility)  # all foot chain visibility
 
@@ -1148,18 +1073,19 @@ class AutoRig(object):
                 self.plusMinusIkFk.output1D.connect(footFkControllerList[i].getShape().visibility)
 
             else:
-                pm.orientConstraint(footFkControllerList[i], mainJoint, maintainOffset=True, name='%s_%s_%s_%s_mainBlending_orientConstraint' % (self.chName, controllerName, zoneB, self.lastSide))
+                pm.orientConstraint(footFkControllerList[i], mainJoint, maintainOffset=True, name='%s_%s_mainBlending_orientConstraint' % (baseNameB, controllerName))
 
             # connect to deform skeleton
             mainJoint.rename(str(footJoints[i]).replace('skin', 'main'))  # rename, useful for snap proxy model
-            pm.orientConstraint(mainJoint, footJoints[i], maintainOffset=False, name='%s_%s_%s_%s_joint_orientConstraint' % (self.chName, controllerName, zoneB, self.lastSide))
+            pm.orientConstraint(mainJoint, footJoints[i], maintainOffset=False, name='%s_%s_joint_orientConstraint' % (baseNameB, controllerName))
 
         ## TOES ##
         # main ik fk toes
         for i, mainJoint in enumerate(toesMainJointsList):
             controllerName = toeControllerNameList[i]
             # orient constraint only, if not, transitions from ik to fk are linear, and ugly
-            orientConstraint = pm.orientConstraint(toesIkControllerList[i], toesFkControllerList[i], mainJoint, maintainOffset=True, name='%s_%s_%s_%s_mainBlending_orientConstraint' % (self.chName, controllerName, zoneB, self.lastSide))
+            orientConstraint = pm.orientConstraint(toesIkControllerList[i], toesFkControllerList[i], mainJoint, maintainOffset=True,
+                                                   name='%s_%s_mainBlending_orientConstraint' % (baseNameB, controllerName))
 
             self.ikFkshape.ikFk.connect(orientConstraint.attr('%sW0' % str(toesIkControllerList[i])))  # shape with bleeding attribute
             self.ikFkshape.ikFk.connect(toesIkControllerList[i].visibility)  # all foot chain visibility
@@ -1169,8 +1095,8 @@ class AutoRig(object):
 
             # connect to deform skeleton, review: point constraint toes main. strange behaviour
             mainJoint.rename(str(toesJoints[i]).replace('skin', 'main'))  # rename, useful for snap proxy model
-            pm.orientConstraint(mainJoint, toesJoints[i], maintainOffset=False, name='%s_%s_%s_%s_joint_orientConstraint' % (self.chName, controllerName, self.lastZone, self.lastSide))
-            pm.pointConstraint(mainJoint, toesJoints[i], maintainOffset=False, name='%s_%s_%s_%s_joint_pointConstraint' % (self.chName, controllerName, self.lastZone, self.lastSide))
+            pm.orientConstraint(mainJoint, toesJoints[i], maintainOffset=False, name='%s_%s_joint_orientConstraint' % (baseNameLZ, controllerName))
+            pm.pointConstraint(mainJoint, toesJoints[i], maintainOffset=False, name='%s_%s_joint_pointConstraint' % (baseNameLZ, controllerName))
 
         # total controllers
         footTotalFkControllers=footFkControllerList + toesFkControllerList
@@ -1185,6 +1111,7 @@ class AutoRig(object):
 
         return footIkControllerList + toesIkControllerList, footTotalFkControllers
 
+
     def hand_auto(self, zones=('hand', 'finger'), planeAlign=None, *funcs):
         """
         This method should be called as a *arg for ikFkChain_auto.
@@ -1195,19 +1122,23 @@ class AutoRig(object):
             *funcs:
         Returns:
         """
+        baseNameB = "%s_%s" % (zones[0], self._lastSide)
+        baseNameC = "%s_%s" % (zones[1], self._lastSide)
+        baseNameLZ = "%s_%s" % (self._lastZone, self._lastSide)
+
         zoneB = zones[0]
         zoneC = zones[1]
-        fkColor = 14 if self.lastSide == 'left' else 29  # review, more procedural
+        fkColor = 14 if self._lastSide == 'left' else 29  # review, more procedural
         # don't get zero joints, this do not has control
-        fingerJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*%s.(?!End)(?!0)(?!twist).*skin_joint$' % (self.chName,zoneB, self.lastSide, zoneC), str(point))]
+        fingerJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.(?!End)(?!0)(?!twist).*skin_joint$' % (zoneB, self._lastSide, zoneC), str(point))]
         # here get zero joints, this do not has control
-        fingerZeroJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*%s.(?!End)(?=0)(?!twist).*skin_joint$' % (self.chName, zoneB, self.lastSide, zoneC), str(point))]
+        fingerZeroJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.(?!End)(?=0)(?!twist).*skin_joint$' % (zoneB, self._lastSide, zoneC), str(point))]
         # get hand joints
-        handJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*((?!twist).).*skin_joint$' % (self.chName, zoneB, self.lastSide), str(point)) and not zoneC in str(point)]
+        handJoints = [point for point in pm.ls() if re.match('^%s.*%s.*((?!twist).).*skin_joint$' % (zoneB, self._lastSide), str(point)) and not zoneC in str(point)]
 
         # arrange toes by joint chain p.e [[toea, toesa_Tip], [toeb, toeb_tip]]
         fingerJointsArr = ARC.arrangeListByHierarchy(fingerJoints)
-        logger.debug('Finger arranged list %s %s: %s' % (zoneB, self.lastSide, fingerJointsArr))
+        logger.debug('Finger arranged list %s %s: %s' % (zoneB, self._lastSide, fingerJointsArr))
 
         # controllers and main lists
         handFkControllerList = []  # fk lists
@@ -1219,12 +1150,12 @@ class AutoRig(object):
         fingerControllerNameList = []
         # create hand ctr
         for joint in handJoints:
-            controllerName = str(joint).split('_')[3]
+            controllerName = str(joint).split('_')[-3]
             logger.debug('foot controller name: %s' % controllerName)
-            handFkCtr = self.create_controller('%s_%s_%s_%s_fk_ctr' % (self.chName, zoneB, self.lastSide, controllerName), '%sFk_%s' % (controllerName, self.lastSide), 1, fkColor)
+            handFkCtr = self.create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
             pm.xform(handFkCtr, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
-            handMain = joint.duplicate(po=True, name='%s_%s_%s_%s_main_joint' % (self.chName, zoneB, self.lastSide, controllerName))[0]
+            handMain = joint.duplicate(po=True, name='%s_%s_main_joint' % (baseNameB, controllerName))[0]
 
             # get transformMatrix and orient new controller TODO: function
             matrix = pm.xform(handFkCtr, ws=True, q=True, m=True)
@@ -1246,19 +1177,19 @@ class AutoRig(object):
             handMainJointsList.append(handMain)
 
         # parent fk controller under ikFk chain
-        fkControlChilds = self.ikFk_FkControllersList[-1].listRelatives(ad=True, type='transform')
+        fkControlChilds = self._ikFk_FkControllersList[-1].listRelatives(ad=True, type='transform')
         if fkControlChilds:
             fkControlChilds[0].addChild(handFkControllerList[0])
         else:
-            self.ikFk_FkControllersList[-1].addChild(handFkControllerList[0])
+            self._ikFk_FkControllersList[-1].addChild(handFkControllerList[0])
 
-        self.ikFk_MainJointList[-1].addChild(handMainJointsList[0])
+        self._ikFk_MainJointList[-1].addChild(handMainJointsList[0])
 
         # twistJointsConnections
         if self.ikFkTwistJoints:
             ARH.twistJointsConnect(self.footTwstList, handMainJointsList[0],
-                                      '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self.lastSide),
-                                               self.footpointCnstr)
+                                      '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self._lastSide),
+                                   self.footpointCnstr)
 
         # create finger Fk and ik ctr
         # last hand fkCtr, easiest access later
@@ -1266,10 +1197,10 @@ class AutoRig(object):
         for i, toe in enumerate(fingerJointsArr):
             fingerMainChain = []
             for joint in toe:
-                controllerName = str(joint).split('_')[3]
+                controllerName = str(joint).split('_')[-3]
                 logger.debug('foot controller name: %s' % controllerName)
                 # review
-                fingerMainJnt = self.create_controller('%s_%s_%s_%s_fk_ctr' % (self.chName, zoneB, self.lastSide, controllerName), '%sFk_%s' % (controllerName, self.lastSide), 1, fkColor)
+                fingerMainJnt = self.create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
                 pm.xform(fingerMainJnt, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
                 # if joint Chain, reconstruct hierarchy
@@ -1285,7 +1216,7 @@ class AutoRig(object):
             handMainJointsList[-1].addChild(fingerMainChain[0])
 
         # ik hand ctr
-        handIkCtr = self.create_controller('%s_%s_%s_hand_ik_ctr' % (self.chName, zoneB, self.lastSide), '%sIk_%s' % (zoneB, self.lastSide), 1, 17)
+        handIkCtr = self.create_controller('%s_hand_ik_ctr' % baseNameB, '%sIk_%s' % (zoneB, self._lastSide), 1, 17)
         self.ikFkCtrGrp.addChild(handIkCtr)
         handIkControllerList.append(handIkCtr)  # append joint to list
 
@@ -1293,7 +1224,7 @@ class AutoRig(object):
             handIkCtr.addChild(i)
 
         pm.delete(self.ikFk_IkControl.firstParent())  # if foot, we do not need this controller
-        self.ikFk_IkControllerList.remove(self.ikFk_IkControl)
+        self._ikFk_IkControllerList.remove(self.ikFk_IkControl)
 
         # fk Roots and autos
         ARC.createRoots(handFkControllerList)
@@ -1310,7 +1241,7 @@ class AutoRig(object):
             if i == 0:
                 # connect ik fk blend system, in a leg system only have one ik controller
                 orientConstraint = pm.orientConstraint(handIkControllerList[-1], handFkControllerList[i], mainJoint, maintainOffset=True,
-                                                       name='%s_%s_%s_%s_mainBlending_orientConstraint' % (self.chName, self.lastZone, controllerName, self.lastSide))
+                                                       name="%s_%s_mainBlending_orientConstraint" % (baseNameLZ, controllerName))
                 self.ikFkshape.ikFk.connect(orientConstraint.attr('%sW0' % str(handIkControllerList[-1])))  # shape with bleeding attribute
                 self.ikFkshape.ikFk.connect(handIkControllerList[i].visibility)  # all foot chain visibility
 
@@ -1325,13 +1256,13 @@ class AutoRig(object):
 
             else:
                 pm.orientConstraint(handFkControllerList[i], mainJoint, maintainOffset=True,
-                                                       name='%s_%s_%s_%s_mainBlending_orientConstraint' % (self.chName, self.lastZone, controllerName, self.lastSide))
+                                    name='%s_%s_mainBlending_orientConstraint' % (baseNameLZ, controllerName))
 
             ARC.lockAndHideAttr(handFkControllerList[i], True, False, False)
 
             # connect to deform skeleton
             mainJoint.rename(str(handJoints[i]).replace('skin', 'main'))  # rename, useful for snap proxy model
-            pm.orientConstraint(mainJoint, handJoints[i], maintainOffset=False, name='%s_%s_%s_%s_joint_orientConstraint' % (self.chName, self.lastZone, controllerName, self.lastSide))
+            pm.orientConstraint(mainJoint, handJoints[i], maintainOffset=False, name='%s_%s_joint_orientConstraint' % (baseNameLZ, controllerName))
 
             ## finger ##
             # main ik fk toes
@@ -1340,8 +1271,8 @@ class AutoRig(object):
 
                 # connect to deform skeleton, review: point constraint toes main. strange behaviour
                 mainJoint.rename(str(fingerJoints[i]).replace('joint', 'ctr'))
-                pm.orientConstraint(mainJoint, fingerJoints[i], maintainOffset=False,  name='%s_%s_%s_%s_joint_orientConstraint' % (self.chName, controllerName, zoneC, self.lastSide))
-                pm.pointConstraint(mainJoint, fingerJoints[i], maintainOffset=False,  name='%s_%s_%s_%s_joint_pointConstraint' % (self.chName, controllerName, zoneC, self.lastSide))
+                pm.orientConstraint(mainJoint, fingerJoints[i], maintainOffset=False, name="%s_%s_joint_orientConstraint" % (baseNameC, controllerName))
+                pm.pointConstraint(mainJoint, fingerJoints[i], maintainOffset=False, name="%s_%s_joint_pointConstraint" % (baseNameC, controllerName))
 
                 if '1' in controllerName:
                     for zeroJoint in fingerZeroJoints:
@@ -1367,13 +1298,14 @@ class AutoRig(object):
         This method should be called as a *arg for ikFkChain_auto.
         :return:
         """
-        fkColor = 14 if self.lastSide == 'left' else 29
-        clavicleJoints = [point for point in pm.ls() if re.match('^%s.*%s.*%s.*(?!End)(?!0)(?!twist).*skin_joint$' % (self.chName, zone, self.lastSide), str(point))]
+        baseName = "%s_%s" % (zone, self._lastSide)
+        fkColor = 14 if self._lastSide == 'left' else 29
+        clavicleJoints = [point for point in pm.ls() if re.match('^%s.*%s.*(?!End)(?!0)(?!twist).*skin_joint$' % (zone, self._lastSide), str(point))]
         clUpperArmJoint = clavicleJoints[-1].getChildren()[0]
 
-        parent = self.ikFk_MainJointList[0].firstParent()  # get parent of the system
+        parent = self._ikFk_MainJointList[0].firstParent()  # get parent of the system
 
-        parentChilds = [child for child in parent.listRelatives(c=True, type='transform') if (self.lastSide in str(child)) and (self.lastZone in str(child).lower()) and not ('pole' in str(child))]
+        parentChilds = [child for child in parent.listRelatives(c=True, type='transform') if (self._lastSide in str(child)) and (self._lastZone in str(child).lower()) and not ('pole' in str(child))]
 
         logger.debug('childs: %s' %parentChilds)
 
@@ -1381,9 +1313,9 @@ class AutoRig(object):
         clavicleMainList = []
 
         for joint in clavicleJoints:
-            controllerName = str(joint).split('_')[3]
+            controllerName = str(joint).split('_')[-3]
             # create controller shape
-            clavicleController = self.create_controller(str(joint).replace('skin', 'fk').replace('joint', 'ctr'), '%sFk_%s' % (controllerName, self.lastSide), 1, fkColor)
+            clavicleController = self.create_controller(str(joint).replace('skin', 'fk').replace('joint', 'ctr'), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
             pm.xform(clavicleController, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
             clavicleMainList.append(clavicleController)
 
@@ -1391,7 +1323,7 @@ class AutoRig(object):
         parent.addChild(clavicleMainList[0])
 
         # swing controller
-        clavicleSwingCrt = self.create_controller('%s_%s_%s_swing_fk_ctr' % (self.chName, zone, self.lastSide), 'swingFk_%s' % self.lastSide, 1, fkColor)
+        clavicleSwingCrt = self.create_controller('%s_swing_fk_ctr' % baseName, 'swingFk_%s' % self._lastSide, 1, fkColor)
         pm.xform(clavicleSwingCrt, ws=True, m=pm.xform(clUpperArmJoint, q=True, ws=True, m=True))  # set transforms
         clavicleMainList[-1].addChild(clavicleSwingCrt)
         clavicleMainList.append(clavicleSwingCrt)
@@ -1410,12 +1342,12 @@ class AutoRig(object):
         autoClavicleName = 'auto%s' % zone.capitalize()
         pm.addAttr(self.ikFkshape, longName=autoClavicleName, shortName=autoClavicleName, minValue=0.0, maxValue=1.0, type='float', defaultValue=0.3, k=True)
         # nodes drive rotation by influence
-        clavicleMultiplyNode = pm.createNode('multiplyDivide', name='%s_%s_%s_multiply' % (self.chName, zone, self.lastSide))
+        clavicleMultiplyNode = pm.createNode('multiplyDivide', name='%s_multiply' % baseName)
         # todo: expose autoClavicle
         for axis in ('Y', 'Z'):
             # multiply by influence
             self.ikFkshape.attr(autoClavicleName).connect(clavicleMultiplyNode.attr('input1%s' % axis))
-            self.ikFk_FkControllersList[0].attr('rotate%s' % axis).connect(clavicleMultiplyNode.attr('input2%s' % axis))
+            self._ikFk_FkControllersList[0].attr('rotate%s' % axis).connect(clavicleMultiplyNode.attr('input2%s' % axis))
             # connect to auto clavicle
             clavicleMultiplyNode.attr('output%s' % axis).connect(clavicleAutoGrpList[0].attr('rotate%s' % axis))
 
@@ -1427,65 +1359,11 @@ class AutoRig(object):
             pm.orientConstraint(clavicleMainList[i], joint, maintainOffset=True)
 
         # save data
-        zoneSide = '%s_%s' % (zone, self.lastSide)
+        zoneSide = '%s_%s' % (zone, self._lastSide)
         #self.ikControllers[zone] = self.neckHeadIKCtrList
         self.fkControllers[zoneSide] = clavicleController
         return [], clavicleMainList
 
-    def addCluster(self, cluster, parent, controllerType, controllerSize=1.0):
-        """
-        Take a cluster or create it, move it to the controller system, create a controller and vinculate
-        :arg: cluster(str or pm): name of the cluster transform node
-        :return:
-        """
-        # cluster var type
-        if isinstance(cluster, str):
-            cluster = pm.PyNode(cluster)
-        # parent var type
-        if isinstance(parent, str):
-            parent = pm.PyNode(parent)
-
-        clusterMatrix = pm.xform(cluster, ws=True, m=True, q=True)
-
-        # look for cluster root
-        clusterRoot = cluster.getParent()
-        # check if parent is a root.
-        if clusterRoot:
-            rootMatrix = pm.xform(clusterRoot, ws=True, m=True, q=True)
-            if rootMatrix == clusterMatrix and len(clusterRoot.listRelatives(c=True)) == 1:
-                pass
-            else:
-                clusterRoot = ARC.createRoots([cluster])
-        else:
-            clusterRoot = ARC.createRoots([cluster])
-
-        # look if cluster is relative
-        # we need cluster DGnode
-        clusterShape = cluster.getShape()
-        clusterDG = clusterShape.clusterTransforms[0].outputs()[0]
-        clusterDG.relative.set(True)
-
-        # visibility shape
-        clusterShape.visibility.set(False)
-
-        # parent cluster root
-        parent.addChild(clusterRoot)
-
-        # createController
-        controller = self.create_controller('%s_ctr' % str(cluster), controllerType, controllerSize, 24)
-        # align with cluster, we need to query world space pivot
-        controller.setTranslation(cluster.getPivots(ws=True)[0], 'world')
-        #pm.xform(controller, ws=True, m=clusterMatrix)
-        #parent
-        parent.addChild(controller)
-        # create root
-        controllerRoot = ARC.createRoots([controller])
-
-        # connect controllr and cluster
-        pm.parentConstraint(controller, cluster, maintainOffset=False, name='%s_parentConstraint' % str(cluster))
-        ARC.DGUtils.connectAttributes(controller, cluster, ['scale'], 'XYZ')
-
-        return [controller], []
 
     def ikFkChain_wire(self, mesh, controllerType=None):
         """
@@ -1493,9 +1371,10 @@ class AutoRig(object):
         Create a wire deformer and put in the hierarchy
         :return:
         """
-        color = 7 if self.lastSide == 'left' else 5
+        baseName="%s_%s" % (self._lastZone, self._lastSide)
+        color = 7 if self._lastSide == 'left' else 5
         # create wire deformer
-        wire, curve = ARC.DeformerOp.setWireDeformer(self.ikFk_MainJointList, mesh, '%s_%s_%s' % (self.chName, self.lastZone, self.lastSide))
+        wire, curve = ARC.DeformerOp.setWireDeformer(self._ikFk_MainJointList, mesh, baseName)
         # Find base curve
         baseCurve = wire.baseWire[0].inputs()[0]
         # get controls
@@ -1504,16 +1383,16 @@ class AutoRig(object):
 
         # vinculate to rig
         for i, trn in enumerate(curveTransforms):
-            self.ikFk_MainJointList[i].addChild(trn)
-            self.ikFk_MainJointList[i].addChild(baseCurveTransforms[i])
+            self._ikFk_MainJointList[i].addChild(trn)
+            self._ikFk_MainJointList[i].addChild(baseCurveTransforms[i])
 
-            trn.rename('%s_%s_%s_wire_%s_drv' % (self.chName, self.lastZone, self.lastSide, i))
+            trn.rename('%s_wire_%s_drv' % (baseName, i))
             if not (i == 0 or i == len(curveTransforms)-1):
                 # createController
                 if controllerType:
-                    controller = self.create_controller('%s_%s_%s_wire_ctr' % (self.chName, self.lastZone, self.lastSide), controllerType, 2.0, color)
+                    controller = self.create_controller('%s_wire_ctr' % baseName, controllerType, 2.0, color)
                 else:
-                    controller = pm.circle(nr=(1, 0, 0), r=5, name='%s_%s_%s_wire_ctr' % (self.chName, self.lastZone, self.lastSide))[0]
+                    controller = pm.circle(nr=(1, 0, 0), r=5, name='%s_wire_ctr' % baseName)[0]
                     pm.delete(controller, ch=True)
                     controllerShape = controller.getShape()
                     controllerShape.overrideEnabled.set(True)
@@ -1522,7 +1401,7 @@ class AutoRig(object):
                 # align controller with point driver
                 pm.xform(controller, ws=True, m=pm.xform(trn, q=True, ws=True, m=True))
                 # parent controller
-                self.ikFk_MainJointList[i].addChild(controller)
+                self._ikFk_MainJointList[i].addChild(controller)
                 controller.setRotation((0, 0, 0), 'object')
                 controller.addChild(trn)  # child of the controller
                 # create Roots
@@ -1537,51 +1416,6 @@ class AutoRig(object):
         baseCurve.visibility.set(False)
 
         # TODO: return controllers
-        return [], []
-
-    def latticeBend_auto(self, lattice, parent):
-        """
-        Given a lattice, create a bend deformer and connect it to the rig
-        :param lattice (str or pm): lattice transform node or shape
-        :param parent (str or pm):
-        :return:
-        """
-        # check data type
-        # check lattice type data
-        if isinstance(lattice, str):
-            lattice = pm.PyNode(lattice)
-        if isinstance(lattice, pm.nodetypes.Transform):
-            latticeTransform = lattice
-            lattice = lattice.getShape()
-
-        if isinstance(parent, str):
-            parent = pm.PyNode(parent)
-
-        # lattice nodes
-        ffd = lattice.worldMatrix.outputs()[0]
-        logger.debug('ffd1: %s' % ffd)
-        latticeBase = ffd.baseLatticeMatrix.inputs()[0]
-        logger.debug('latticeBase %s' % latticeBase)
-
-        # look if lastSide attr exist
-        baseName = [self.chName, self.lastZone]
-        if hasattr(self, 'lastSide'):
-            # if it is the case, append to name
-            baseName.append(self.lastSide)
-
-        baseName.extend(['lattice', 'ctr'])
-        controllerName = '_'.join(baseName)
-
-        controller = self.create_controller(controllerName, 'pole', 1.8, 24)
-        latticeList = ARC.DeformerOp.latticeBendDeformer(lattice, controller)
-
-        # parent
-        latticeList.append(latticeBase)
-        pm.parent(latticeList, parent)
-
-        # hide lattice
-        latticeTransform.visibility.set(False)
-
         return [], []
 
 
@@ -1600,7 +1434,7 @@ class AutoRig(object):
         VM_N = ARC.VectorMath_Nodes  # vector math for nodes module
         DGU = ARC.DGUtils  # dependency graph utils
 
-        skirtJoints = [point for point in pm.ls() if re.match('^%s.*(%s).*joint$' % (self.chName, zone), str(point))]
+        skirtJoints = [point for point in pm.ls() if re.match('^%s.*%s$' % (zone, self._skinJointNaming), str(point))]
         # arrange lists by hierarchy
         skirtJointsArrange = ARC.arrangeListByHierarchy(skirtJoints)
 
@@ -1871,44 +1705,3 @@ class AutoRig(object):
             for j, pointCtr in enumerate(pointChanCtr):
                 pm.pointConstraint(pointCtr, skirtJointsArrange[i][j], maintainOffset=False)
                 pm.orientConstraint(pointCtr, skirtJointsArrange[i][j], maintainOffset=False)
-
-
-    def point_auto(self, zone, parent):
-        """
-        Create a simple point control for a joint
-        :param zone: zone of the points (joints)
-        :param parent: parent of the controllers
-        :return:
-        """
-        pointJoints = [point for point in pm.ls() if re.match('^%s.*%s.*.*joint$' % (self.chName, zone), str(point))]
-
-        # create controllers
-        pointControllers = []
-        for joint in pointJoints:
-            controller = self.create_controller(str(joint).replace('joint', 'ctr'), 'pole', 2, 10)
-            pm.xform(controller, ws=True, m=pm.xform(joint, ws=True, q=True, m=True))
-            # hierarchy
-            parent.addChild(controller)
-            pointControllers.append(controller)
-
-        # roots
-        ARC.createRoots(pointControllers)
-
-        # conenct to joints
-        for i, joint in enumerate(pointJoints):
-            pm.pointConstraint(pointControllers[i], joint, maintainOffset=False)
-            pm.orientConstraint(pointControllers[i], joint, maintainOffset=False)
-            ARC.DGUtils.connectAttributes(pointControllers[i], joint, ['scale'], 'XYZ')
-
-
-    def create_controller(self, name, controllerType, s=1.0, colorIndex=4):
-        """
-        Args:
-            name: name of controller
-            controllerType(str): from json controller types
-        return:
-            controller: pymel transformNode
-            transformMatrix: stored position
-        """
-        controller = ARC.createController(name, controllerType, self.chName, self.path, s, colorIndex)
-        return controller

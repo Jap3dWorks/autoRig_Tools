@@ -390,6 +390,7 @@ def twistJointBendingBoneConnect(parent, mainJointList, twistList, joints, twist
 
                 else:
                     if path:
+                        # review, change this, simplify the controller creation arguments
                         pointController = createController('%s_%s_%s_%s_%s_ctr' % (chName, nametype, zone, side, NameIdList[i]), '%sTwistPoint_%s' % (zone, side), chName, path, 1, pointColor)
                     else:
                         pointController = pm.circle(name='%s_%s_%s_%s_%s_ctr' % (chName, nametype, zone, side, NameIdList[i]), r=10)[0]  # if not path, controller is a circle

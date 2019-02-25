@@ -301,7 +301,6 @@ class PSDUtils(object):
         ptr = util.asDoublePtr()
         offsetQ.getAxisAngle(rotAxis, ptr)  # <- get angle and vector
         angle = util.getDouble(ptr)
-        print "rotation angle, ", math.degrees(angle)
 
         # joint position
         jointPos = joint.getTranslation('world')
@@ -310,6 +309,10 @@ class PSDUtils(object):
         baseMesh = skinMesh.duplicate(name='%s_delta' % str(skinMesh))[0]
         baseMeshShape = baseMesh.getShape()
 
+        #space locator
+        loc = pm.spaceLocator()
+        loc.setTranslation(rotAxis * 5)
+
         # TODO: vertex no modified get from skinned mesh joint pos == 0
         for index in diferenceIndex:
             influence = pm.skinPercent(skinCluster, skinMesh.vtx[index], transform=joint, query=True)
@@ -317,17 +320,14 @@ class PSDUtils(object):
             joinChild = [str(j) for j in joint.listRelatives(ad=True)]
             jointsInfluence = pm.skinPercent(skinCluster, skinMesh.vtx[index], q=True, transform=None)
             matchJoint = set(joinChild).intersection(set(jointsInfluence))
-            # print "first query inf: ", influence
             for j in matchJoint:
                 influence += pm.skinPercent(skinCluster, skinMesh.vtx[index], transform=j, query=True)
-                # print "Second query inf: ", influence
 
             # vector from joint to vertex sculpted
             sculptVector = positive.getPoint(index, 'object')  # review
             sculptVector = pm.datatypes.Vector(sculptVector - jointPos)
 
             # if influence == 0 don't calculate
-            # if influence < 1 && influence > 0 -> enter this method
             if influence:
                 angleA = math.pi - (angle/2 + math.pi/2)
                 angleB = math.pi - (angle*influence + angleA)
@@ -342,31 +342,6 @@ class PSDUtils(object):
                 rotatedVector = rotatedVector*lengthFVector  # correct length
 
                 sculptVector = rotatedVector
-
-            # elif influence == 0:
-            #     baseMeshShape.setPoint(index, sculptVector + jointPos, 'world')
-
-            # elif influence == 1:
-            #     # pose0
-            #     face = [f.index() for f in skinMesh.vtx[index].connectedFaces()][0]
-            #     tangent_z = skinMesh.getFaceVertexTangent(face, index, "world")
-            #     binormal_z= skinMesh.getFaceVertexBinormal(face, index, "world")
-            #     normal_z = skinMesh.getFaceVertexNormal(face, index, "world")
-            #     matrix_z = pm.datatypes.Matrix(tangent_z, binormal_z, normal_z)
-            #
-            #     # posed
-            #     joint.setRotation(angleEu)
-            #     tangent_p = skinMesh.getFaceVertexTangent(face, index, "world")
-            #     binormal_p = skinMesh.getFaceVertexBinormal(face, index, "world")
-            #     normal_p = skinMesh.getFaceVertexNormal(face, index, "world")
-            #     matrix_p = pm.datatypes.Matrix(tangent_p, binormal_p, normal_p)
-            #
-            #     # return to zero
-            #     joint.setRotation([0,0,0])
-            #
-            #     # transpose vector
-            #     sculptVector_p = sculptVector * matrix_p.inverse()
-            #     sculptVector = sculptVector_p * matrix_z
 
             baseMeshShape.setPoint(index, sculptVector + jointPos, 'world')
 
