@@ -539,45 +539,6 @@ class DeformerOp:
             :param BSNode (str):
             :return:
             """
-            """
-            # get DN
-            mSelection = OpenMaya.MSelectionList()
-            mSelection.add(BSNode)
-            mDNBlendShape = OpenMaya.MObject()
-            mSelection.getDependNode(0, mDNBlendShape)
-
-            # get MFNDepNode
-            mFnDepNode = OpenMaya.MFnDependencyNode(mDNBlendShape)
-            # get plug
-            plug_weightInputT = mFnDepNode.findPlug('inputTarget', True)
-            plug_weightCompound = plug_weightInputT.elementByLogicalIndex(0)
-            plug_weight = plug_weightCompound.child(1)  # index number 1
-
-            dataHandle = plug_weight.asMDataHandle()
-            arrayDataHandle = OpenMaya.MArrayDataHandle(dataHandle)
-
-            # iterate over the mplug array
-            # set the array with the total of points
-            mFloatArray = OpenMaya.MFloatArray(arraySize, 0.0)
-            pmAttr = pm.PyNode(plug_weight.info())
-
-            for i in range(numElements):
-                #arrayDataHandle.jumpToArrayElement(i)
-                #arrayId = arrayDataHandle.elementIndex()
-                #mFloatArray.set(arrayDataHandle.outputValue().asFloat(), arrayId)
-                mFloatArray.set(pmAttr[i].get(), i)
-
-            return plug_weight, arrayDataHandle, dataHandle, arraySize
-
-            # remember to call:
-            # destruct handle must be called
-            plug_weight.destructHandle(dataHandle)
-
-            # to update the node
-            #BSNodePM = pm.PyNode(BSNode)
-            #BSNodePM.nodeState.set(0)
-            """
-
             # get total vertex in mesh
             mesh = pm.PyNode(str(BSNode)).outputGeometry.outputs()[0].getShape()
             arraySize = mesh.numVertices()

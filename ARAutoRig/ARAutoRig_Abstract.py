@@ -2,9 +2,7 @@ import pymel.core as pm
 import re
 from maya import OpenMaya
 
-from ..ARCore import ctrSaveLoadToJson
 from ..ARCore import ARCore as ARC
-from ..ARCore import ARHelper as ARH
 
 import logging
 logging.basicConfig()
@@ -17,9 +15,10 @@ class _ARAutoRig_Abstract(object):
         autoRig class tools
         """
         # TODO: create node Module or chName_rig_grp transform node with messages attributes to store connections
-        self.chName = chName
-        self.path = path
+        self._chName = chName
+        self._path = path
 
+        # private attributes
         self._lastZone=""
         self._lastSide=""
         # skin joints name marker
@@ -28,18 +27,18 @@ class _ARAutoRig_Abstract(object):
         # create necessary groups
         # check if noXform exist
         try:
-            self.noXformGrp = pm.PyNode('noXform_grp')
+            self._noXformGrp = pm.PyNode('noXform_grp')
         except:
-            self.noXformGrp = pm.group(name='noXform_grp', empty=True)
-            self.noXformGrp.inheritsTransform.set(False)
-            pm.PyNode('rig_grp').addChild(self.noXformGrp)
+            self._noXformGrp = pm.group(name='noXform_grp', empty=True)
+            self._noXformGrp.inheritsTransform.set(False)
+            pm.PyNode('rig_grp').addChild(self._noXformGrp)
 
         # check if ctr_grp exist
         try:
-            self.ctrGrp = pm.PyNode('ctr_grp')
+            self._ctrGrp = pm.PyNode('ctr_grp')
         except:
-            self.ctrGrp = pm.group(name='ctr_grp', empty=True)
-            pm.PyNode('rig_grp').addChild(self.ctrGrp)
+            self._ctrGrp = pm.group(name='ctr_grp', empty=True)
+            pm.PyNode('rig_grp').addChild(self._ctrGrp)
 
 
 
@@ -134,7 +133,7 @@ class _ARAutoRig_Abstract(object):
         logger.debug('latticeBase %s' % latticeBase)
 
         # look if lastSide attr exist
-        baseName = [self.chName, self._lastZone]
+        baseName = [self._chName, self._lastZone]
         if hasattr(self, 'lastSide'):
             # if it is the case, append to name
             baseName.append(self._lastSide)
@@ -142,7 +141,7 @@ class _ARAutoRig_Abstract(object):
         baseName.extend(['lattice', 'ctr'])
         controllerName = '_'.join(baseName)
 
-        controller = self.create_controller(controllerName, 'pole', 1.8, 24)
+        controller = self._create_controller(controllerName, 'pole', 1.8, 24)
         latticeList = ARC.DeformerOp.latticeBendDeformer(lattice, controller)
 
         # parent
@@ -195,7 +194,7 @@ class _ARAutoRig_Abstract(object):
         parent.addChild(clusterRoot)
 
         # createController
-        controller = self.create_controller('%s_ctr' % str(cluster), controllerType, controllerSize, 24)
+        controller = self._create_controller('%s_ctr' % str(cluster), controllerType, controllerSize, 24)
         # align with cluster, we need to query world space pivot
         controller.setTranslation(cluster.getPivots(ws=True)[0], 'world')
         #pm.xform(controller, ws=True, m=clusterMatrix)
@@ -223,7 +222,7 @@ class _ARAutoRig_Abstract(object):
         # create controllers
         pointControllers = []
         for joint in pointJoints:
-            controller = self.create_controller(str(joint).replace('joint', 'ctr'), 'pole', 2, 10)
+            controller = self._create_controller(str(joint).replace('joint', 'ctr'), 'pole', 2, 10)
             pm.xform(controller, ws=True, m=pm.xform(joint, ws=True, q=True, m=True))
             # hierarchy
             parent.addChild(controller)
@@ -239,7 +238,7 @@ class _ARAutoRig_Abstract(object):
             ARC.DGUtils.connectAttributes(pointControllers[i], joint, ['scale'], 'XYZ')
 
 
-    def create_controller(self, name, controllerType, s=1.0, colorIndex=4):
+    def _create_controller(self, name, controllerType, s=1.0, colorIndex=4):
         """
         Args:
             name: name of controller
@@ -248,5 +247,5 @@ class _ARAutoRig_Abstract(object):
             controller: pymel transformNode
             transformMatrix: stored position
         """
-        controller = ARC.createController(name, controllerType, self.chName, self.path, s, colorIndex)
+        controller = ARC.createController(name, controllerType, self._chName, self._path, s, colorIndex)
         return controller

@@ -2,10 +2,9 @@ import pymel.core as pm
 import re
 from maya import OpenMaya
 
-from ..ARCore import ctrSaveLoadToJson
 from ..ARCore import ARCore as ARC
 from ..ARCore import ARHelper as ARH
-import ARAutoRig_Abstract
+from ARAutoRig_Abstract import _ARAutoRig_Abstract
 
 import logging
 logging.basicConfig()
@@ -19,7 +18,10 @@ logger.setLevel(logging.DEBUG)
 # akona_spine_chest_IK_ctr
 # akona_arm_left_foreArm_twist1_jnt
 
-class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
+class ARAutoRig_Body(_ARAutoRig_Abstract):
+    """
+    Class to construct corporal rig
+    """
     def __init__(self, chName, path):
         """
         autoRig class tools
@@ -35,10 +37,10 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         # create Main ctr
         try:
             self.mainCtr = pm.PyNode('main_ctr')
-            self.ctrGrp.addChild(self.mainCtr)
+            self._ctrGrp.addChild(self.mainCtr)
         except:
-            self.mainCtr = self.create_controller('main_ctr', 'main', 1, 18)
-            self.ctrGrp.addChild(self.mainCtr)
+            self.mainCtr = self._create_controller('main_ctr', 'main', 1, 18)
+            self._ctrGrp.addChild(self.mainCtr)
 
         # connect main scale to grp joints
         ARC.DGUtils.connectAttributes(self.mainCtr, pm.PyNode('joints_grp'), ['scale'], ['X', 'Y', 'Z'])
@@ -47,7 +49,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
     # TODO: zone var in names
     def spine_auto(self, zone='spine', *funcs):
         """
-            Auto create a character spine
+        Auto create a character spine
         """
         baseName = zone
         # detect spine joints and their positions
@@ -59,7 +61,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         # parent to nXform grp
         noXformSpineGrp = pm.group(empty=True, name='noXform_%s_grp' % baseName)
         noXformSpineGrp.inheritsTransform.set(False)
-        self.noXformGrp.addChild(noXformSpineGrp)
+        self._noXformGrp.addChild(noXformSpineGrp)
         noXformSpineGrp.addChild(spineCurveTransform)
 
         # curve shape node
@@ -87,7 +89,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             spineDrvList.append(spineDriver)
 
             # create controller and parent locator
-            spineController = self.create_controller('%s_%s_1_ik_ctr' % (baseName, ctrType), '%sIk' % ctrType, 1, 17)
+            spineController = self._create_controller('%s_%s_1_ik_ctr' % (baseName, ctrType), '%sIk' % ctrType, 1, 17)
             logger.debug('spine controller: %s' % spineController)
 
             spineController.setTranslation(point)
@@ -99,7 +101,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             if n < 3:
                 # first fk controller bigger
                 fkCtrSize = 1.5 if len(spineFKControllerList) == 0 else 1
-                spineFKController = self.create_controller('%s_%s_fk_ctr' % (baseName, n + 1), 'hipsFk', fkCtrSize, 4)
+                spineFKController = self._create_controller('%s_%s_fk_ctr' % (baseName, n + 1), 'hipsFk', fkCtrSize, 4)
                 spineFKController.setTranslation(point)
                 spineFKControllerList.append(spineFKController)
 
@@ -250,12 +252,12 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
 
     def neckHead_auto(self, zone='neckHead', *funcs):
         """
-        Create neck head system
+        Create neck head system.
         :param zone:
         :param funcs:
         :return:
         """
-        self._lastZone=zone
+        self._lastZone = zone
         baseName = zone
         # store joints, not end joint
         neckHeadJoints = [point for point in pm.ls() if re.match('^%s.*%s$' % (zone, self._skinJointNaming), str(point))]
@@ -266,7 +268,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         # parent to noXform grp
         noXformNeckHeadGrp = pm.group(empty=True, name='%s_noXform_grp' % baseName)
         noXformNeckHeadGrp.inheritsTransform.set(False)
-        self.noXformGrp.addChild(noXformNeckHeadGrp)
+        self._noXformGrp.addChild(noXformNeckHeadGrp)
         noXformNeckHeadGrp.addChild(neckHeadCurveTransform)
 
         neckHeadCurve = neckHeadCurveTransform.getShape()
@@ -297,7 +299,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             if n > 1 and not n == neckHeadCurve.numCVs()-2:
                 # create controller and parent drivers to controllers
                 ctrType = 'neck' if not len(self.neckHeadIKCtrList) else 'head'
-                neckHeadIKCtr = self.create_controller('%s_%s_ik_ctr' % (baseName, ctrType), '%sIk' % ctrType, 1, 17)
+                neckHeadIKCtr = self._create_controller('%s_%s_ik_ctr' % (baseName, ctrType), '%sIk' % ctrType, 1, 17)
                 logger.debug('neckHead controller: %s' % neckHeadIKCtr)
 
                 if n == neckHeadCurve.numCVs() - 1:  # las iteration
@@ -311,11 +313,11 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
 
                 # create FK controllers, only with the first ik controller
                 if len(self.neckHeadIKCtrList) == 1:
-                    neckHeadFKCtr = self.create_controller('%s_%s1_fk_ctr' % (baseName, ctrType), 'neckFk1',1,4)
+                    neckHeadFKCtr = self._create_controller('%s_%s1_fk_ctr' % (baseName, ctrType), 'neckFk1', 1, 4)
                     neckHeadFKCtr.setTranslation(neckHeadJoints[0].getTranslation('world'), 'world')
                     neckHeadFKCtrList.append(neckHeadFKCtr)
 
-                    neckHeadFKCtr2 = self.create_controller('%s_%s2_fk_ctr' % (baseName, ctrType), 'neckFk', 1, 4)
+                    neckHeadFKCtr2 = self._create_controller('%s_%s2_fk_ctr' % (baseName, ctrType), 'neckFk', 1, 4)
                     neckHeadFKCtr2.setTranslation(neckHeadJoints[1].getTranslation('world'), 'world')
                     neckHeadFKCtrList.append(neckHeadFKCtr2)
                     # create hierarchy
@@ -551,7 +553,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             # so tryCatch should give an error
             try:
                 # review this, use a check, not a try
-                fkControl = self.create_controller('%s_%s_fk_ctr' % (baseName, controllerName), '%sFk_%s' % (controllerName, side), 1, fkColor)
+                fkControl = self._create_controller('%s_%s_fk_ctr' % (baseName, controllerName), '%sFk_%s' % (controllerName, side), 1, fkColor)
                 pm.xform(fkControl, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
                 self._ikFk_FkControllersList.append(fkControl)
             except:
@@ -609,7 +611,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
                 fkCtr.addChild(self._ikFk_FkControllersList[i + 1])
 
         # ik control
-        self.ikFk_IkControl = self.create_controller("%s_ik_ctr" % baseName, "%sIk_%s" % (zoneA, side), 1, 17)
+        self.ikFk_IkControl = self._create_controller("%s_ik_ctr" % baseName, "%sIk_%s" % (zoneA, side), 1, 17)
         self.ikFk_IkControl.setTranslation(ikFkJoints[-1].getTranslation('world'), 'world')
         self.ikFkCtrGrp.addChild(self.ikFk_IkControl)  # parent to ctr group
 
@@ -633,7 +635,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         ikEffector.rename('%s_ik_effector' % baseName)
         self.ikFk_IkControl.addChild(ikHandle)
         # create poles
-        ikFkPoleController = self.create_controller('%s_pole_ik_ctr' % baseName, "pole",2)
+        ikFkPoleController = self._create_controller('%s_pole_ik_ctr' % baseName, "pole", 2)
         ARC.relocatePole(ikFkPoleController, self._ikFk_IkJointList, 35)  # relocate pole Vector
         self.ikFkCtrGrp.addChild(ikFkPoleController)
         pm.addAttr(ikFkPoleController, ln='polePosition', at='enum', en="world:root:foot", k=True)
@@ -730,7 +732,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             # if twist joints, we could desire bending controls or not
             if bendingBones:
                 # todo: name args
-                ARH.twistJointBendingBoneConnect(parent, self._ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints, self.chName, zone, side, NameIdList, self.path)
+                ARH.twistJointBendingBoneConnect(parent, self._ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints, self._chName, zone, side, NameIdList, self._path)
             else:
                 ARH.twistJointConnect(self._ikFk_MainJointList, ikFkTwistList, ikFkJoints, ikFkTwistSyncJoints)
 
@@ -806,7 +808,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         for joint in footJoints:
             controllerName = str(joint).split('_')[-3]
             logger.debug('foot controller name: %s' % controllerName)
-            footFkCtr = self.create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName),
+            footFkCtr = self._create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName),
                                                '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
             pm.xform(footFkCtr, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
@@ -819,7 +821,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             pm.xform(footFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             # fk control Shape
-            shape = self.create_controller('%sShape' % str(footFkCtr), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
+            shape = self._create_controller('%sShape' % str(footFkCtr), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
             footFkCtr.addChild(shape.getShape(), s=True, r=True)
             pm.delete(shape)
 
@@ -846,10 +848,9 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
 
         self._ikFk_MainJointList[-1].addChild(footMainJointsList[0])
 
-
         # twistJointsConnections
         if self.ikFkTwistJoints:
-            ARH.twistJointsConnect(self.footTwstList, footMainJointsList[0], '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self._lastSide), self.footpointCnstr)
+            ARH.twistJointsConnect(self.footTwstList, footMainJointsList[0], '%s_%s_%s_%s' % (self._chName, self.footTwstCtrName, self.footTwstZone, self._lastSide), self.footpointCnstr)
 
         # TODO: function from joint, ik, fk, main?
         # create toe Fk and ik ctr
@@ -864,12 +865,12 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
                 logger.debug('foot controller name: %s' % controllerName)
 
                 # create controllers and main
-                toeFkCtr = self.create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
+                toeFkCtr = self._create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
                 pm.xform(toeFkCtr, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
                 toeMainJnt = joint.duplicate(po=True, name='%s_%s_main_joint' % (baseNameB, controllerName))[0]
 
-                toeIkCtr = self.create_controller('%s_%s_ik_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
+                toeIkCtr = self._create_controller('%s_%s_ik_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
                 pm.xform(toeIkCtr, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
                 # if joint Chain (not the first controller created), reconstruct hierarchy
@@ -902,7 +903,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             footMainJointsList[-1].addChild(toeMainChain[0])
 
         # ik foot ctr TODO: simplify this section
-        footIkCtr = self.create_controller('%s_foot_ik_ctr' % baseNameB, '%sIk_%s' % (zoneB, self._lastSide), 1, 17)
+        footIkCtr = self._create_controller('%s_foot_ik_ctr' % baseNameB, '%sIk_%s' % (zoneB, self._lastSide), 1, 17)
         self.ikFkCtrGrp.addChild(footIkCtr)
         footIkControllerList.append(footIkCtr)  # append joint to list
         for toeCtr in toeIkCtrParents:
@@ -922,12 +923,12 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         for ctrType in footIkAttrTypes[:-1]:
             if ctrType == 'tilt':
                 for inOut in ('In', 'Out'):
-                    footIkCtrWalk = self.create_controller('%s_foot%s%s_ik_ctr' % (baseNameB, ctrType.capitalize(), inOut), 'foot%s%sIk_%s' % (ctrType.capitalize(), inOut, self._lastSide), 1, 17)
+                    footIkCtrWalk = self._create_controller('%s_foot%s%s_ik_ctr' % (baseNameB, ctrType.capitalize(), inOut), 'foot%s%sIk_%s' % (ctrType.capitalize(), inOut, self._lastSide), 1, 17)
                     footIkControllerList[-1].addChild(footIkCtrWalk)
                     footIkCtr.attr('showControls').connect(footIkCtrWalk.getShape().visibility)
                     footIkControllerList.append(footIkCtrWalk)
             else:
-                footIkCtrWalk = self.create_controller('%s_foot%s_ik_ctr' % (baseNameB, ctrType.capitalize()), 'foot%sIk_%s' % (ctrType.capitalize(), self._lastSide), 1, 17)
+                footIkCtrWalk = self._create_controller('%s_foot%s_ik_ctr' % (baseNameB, ctrType.capitalize()), 'foot%sIk_%s' % (ctrType.capitalize(), self._lastSide), 1, 17)
                 footIkControllerList[-1].addChild(footIkCtrWalk)
                 footIkCtr.attr('showControls').connect(footIkCtrWalk.getShape().visibility)
                 footFootRollCtr.append(footIkCtrWalk)  # save footRoll controllers
@@ -962,9 +963,9 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         self._ikFk_IkControllerList.remove(self.ikFk_IkControl)
 
         # toes general Controller ik Fk review: no side review: ik ctrllers  simplyfy with for
-        toeFkGeneralController = self.create_controller('%s_toeGeneral_fk_ctr' % baseNameB, 'toesFk', 1, fkColor)
+        toeFkGeneralController = self._create_controller('%s_toeGeneral_fk_ctr' % baseNameB, 'toesFk', 1, fkColor)
         pm.xform(toeFkGeneralController, ws=True, m=middleToeCtrMatrix)  # align to middle individual toe review
-        toeIkGeneralController = self.create_controller('%s_toeGeneral_ik_ctr' % baseNameB, 'toesFk', 1, fkColor)
+        toeIkGeneralController = self._create_controller('%s_toeGeneral_ik_ctr' % baseNameB, 'toesFk', 1, fkColor)
         pm.xform(toeIkGeneralController, ws=True, m=middleToeCtrMatrix)
         # parent and store to lists
         footFkControllerList[-1].addChild(toeFkGeneralController)
@@ -1152,7 +1153,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         for joint in handJoints:
             controllerName = str(joint).split('_')[-3]
             logger.debug('foot controller name: %s' % controllerName)
-            handFkCtr = self.create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
+            handFkCtr = self._create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
             pm.xform(handFkCtr, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
             handMain = joint.duplicate(po=True, name='%s_%s_main_joint' % (baseNameB, controllerName))[0]
@@ -1188,7 +1189,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         # twistJointsConnections
         if self.ikFkTwistJoints:
             ARH.twistJointsConnect(self.footTwstList, handMainJointsList[0],
-                                      '%s_%s_%s_%s' % (self.chName, self.footTwstCtrName, self.footTwstZone, self._lastSide),
+                                      '%s_%s_%s_%s' % (self._chName, self.footTwstCtrName, self.footTwstZone, self._lastSide),
                                    self.footpointCnstr)
 
         # create finger Fk and ik ctr
@@ -1200,7 +1201,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
                 controllerName = str(joint).split('_')[-3]
                 logger.debug('foot controller name: %s' % controllerName)
                 # review
-                fingerMainJnt = self.create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
+                fingerMainJnt = self._create_controller('%s_%s_fk_ctr' % (baseNameB, controllerName), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
                 pm.xform(fingerMainJnt, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
 
                 # if joint Chain, reconstruct hierarchy
@@ -1216,7 +1217,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             handMainJointsList[-1].addChild(fingerMainChain[0])
 
         # ik hand ctr
-        handIkCtr = self.create_controller('%s_hand_ik_ctr' % baseNameB, '%sIk_%s' % (zoneB, self._lastSide), 1, 17)
+        handIkCtr = self._create_controller('%s_hand_ik_ctr' % baseNameB, '%sIk_%s' % (zoneB, self._lastSide), 1, 17)
         self.ikFkCtrGrp.addChild(handIkCtr)
         handIkControllerList.append(handIkCtr)  # append joint to list
 
@@ -1289,7 +1290,6 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
                             # orient constraint, joint to froxy null
                             pm.orientConstraint(fingerProxyNull, zeroJoint, maintainOffset=False)
 
-
             return handIkControllerList, handFkControllerList + fingerMainJointsList
 
 
@@ -1315,7 +1315,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         for joint in clavicleJoints:
             controllerName = str(joint).split('_')[-3]
             # create controller shape
-            clavicleController = self.create_controller(str(joint).replace('skin', 'fk').replace('joint', 'ctr'), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
+            clavicleController = self._create_controller(str(joint).replace('skin', 'fk').replace('joint', 'ctr'), '%sFk_%s' % (controllerName, self._lastSide), 1, fkColor)
             pm.xform(clavicleController, ws=True, m=pm.xform(joint, q=True, ws=True, m=True))
             clavicleMainList.append(clavicleController)
 
@@ -1323,7 +1323,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
         parent.addChild(clavicleMainList[0])
 
         # swing controller
-        clavicleSwingCrt = self.create_controller('%s_swing_fk_ctr' % baseName, 'swingFk_%s' % self._lastSide, 1, fkColor)
+        clavicleSwingCrt = self._create_controller('%s_swing_fk_ctr' % baseName, 'swingFk_%s' % self._lastSide, 1, fkColor)
         pm.xform(clavicleSwingCrt, ws=True, m=pm.xform(clUpperArmJoint, q=True, ws=True, m=True))  # set transforms
         clavicleMainList[-1].addChild(clavicleSwingCrt)
         clavicleMainList.append(clavicleSwingCrt)
@@ -1390,7 +1390,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             if not (i == 0 or i == len(curveTransforms)-1):
                 # createController
                 if controllerType:
-                    controller = self.create_controller('%s_wire_ctr' % baseName, controllerType, 2.0, color)
+                    controller = self._create_controller('%s_wire_ctr' % baseName, controllerType, 2.0, color)
                 else:
                     controller = pm.circle(nr=(1, 0, 0), r=5, name='%s_wire_ctr' % baseName)[0]
                     pm.delete(controller, ch=True)
@@ -1410,9 +1410,9 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
                 ARC.lockAndHideAttr(controller, False, True, True)
 
         # curves to no xform grp
-        self.noXformGrp.addChild(curve.getTransform())
+        self._noXformGrp.addChild(curve.getTransform())
         curve.visibility.set(False)
-        self.noXformGrp.addChild(baseCurve.getTransform())
+        self._noXformGrp.addChild(baseCurve.getTransform())
         baseCurve.visibility.set(False)
 
         # TODO: return controllers
@@ -1450,7 +1450,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
             fkChainController=[]
             pointChainController=[]
             for joint in chainJoints:
-                controller = self.create_controller(str(joint).replace('joint', 'ctr').replace('skin', 'fk'), 'squareFk', 1, 11)
+                controller = self._create_controller(str(joint).replace('joint', 'ctr').replace('skin', 'fk'), 'squareFk', 1, 11)
                 pm.xform(controller, ws=True, m=pm.xform(joint, ws=True, q=True, m=True))
                 # construct hierarchy
                 if fkChainController:
@@ -1461,7 +1461,7 @@ class ARAutoRig_Body(ARAutoRig_Abstract._ARAutoRig_Abstract):
                 fkChainController.append(controller)
 
                 # create point ctr
-                pointCtr = self.create_controller(str(controller).replace('ctr', 'ctr').replace('fk', 'point'), 'pole', 0.5, 7)
+                pointCtr = self._create_controller(str(controller).replace('ctr', 'ctr').replace('fk', 'point'), 'pole', 0.5, 7)
                 pm.xform(pointCtr, ws=True, m=pm.xform(controller, ws=True, q=True, m=True))
 
                 # parent to controller
