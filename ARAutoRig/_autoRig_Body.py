@@ -4,7 +4,7 @@ from maya import OpenMaya
 
 from ..ARCore import ARCore as ARC
 from ..ARCore import ARHelper as ARH
-from ARAutoRig_Abstract import _ARAutoRig_Abstract
+from AutoRig_Abstract import _ARAutoRig_Abstract
 
 import logging
 logging.basicConfig()
@@ -33,6 +33,7 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
 
         # super class init
         super(ARAutoRig_Body, self).__init__(chName, path)
+        #_ARAutoRig_Abstract.__init__(self, chName, path)
 
         # create Main ctr
         try:
