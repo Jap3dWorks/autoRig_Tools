@@ -2543,7 +2543,7 @@ class VectorMath():
 ## SYSTEMS ##
 #############
 # classes to automatize rig systems
-class System(object):
+class _System(object):
     """
     Base abstract class for all systems
     """
@@ -2615,7 +2615,7 @@ class System(object):
         self.noXformGrp.inheritsTransform.set(False)  # don't affect parents transforms
 
 
-class nurbsStripPointController(System):
+class nurbsStripPointController(_System):
     """
     Create simple controllers for a nurb surface strip
     """
@@ -2664,7 +2664,7 @@ class nurbsStripPointController(System):
         createRoots(self.controllers)
 
 
-class VariableFk(System):
+class VariableFk(_System):
     """
     Create a variableFk system
     :param curve:
@@ -2885,7 +2885,7 @@ class VariableFk(System):
             pm.pointConstraint(jointsSkin[i], joint, maintainOffset=False)
 
 
-class WireCurve(System):
+class WireCurve(_System):
     """
     Build a wire system on a curve, trying to maintain the length of the curve when move extremes.
     :param curve(str or pm):
