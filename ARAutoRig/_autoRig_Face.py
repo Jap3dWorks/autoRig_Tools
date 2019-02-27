@@ -2,7 +2,7 @@ import pymel.core as pm
 from maya import OpenMaya
 import re
 
-from AutoRig_Abstract import _ARAutoRig_Abstract
+from _autoRig_Abstract import _ARAutoRig_Abstract
 from ..ARCore import ARCore as ARC
 
 import logging

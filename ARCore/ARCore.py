@@ -1,6 +1,7 @@
 import pymel.core as pm
 import maya.cmds as cmds
 from maya import OpenMaya
+import maya.api.OpenMaya as OpenMaya2
 from maya import OpenMayaAnim
 import ctrSaveLoadToJson
 import inspect
@@ -10,6 +11,7 @@ import logging
 logging.basicConfig()
 logger = logging.getLogger('ARCore:')
 logger.setLevel(logging.DEBUG)
+
 
 def getCurrentPath():
     """
@@ -442,9 +444,110 @@ def snapCurveToPoints(points, curve, iterations=4, precision=0.05):
 
 class APIHelp:
     """
-    Help Operations for the maya API
+    Help Operations using the API, and help funcs to use the API
     """
-    pass
+    @staticmethod
+    def findAttr(attr, *args):
+        """
+        Find objects with the desired attr. API2
+        Args:
+            attr: Attribute desired
+            *args: objects we want to check, if no *args check entire scene
+
+        Returns: Pymel objects List that contain the attribute
+        """
+
+        mselList = OpenMaya2.MSelectionList()
+        # if some args are given
+        if len(args):
+            for i in args:
+                mselList.add(i)
+        # no args check entire scene
+        else:
+            mselList.add('*')
+
+        # msellist iterator
+        mselList_It = OpenMaya2.MItSelectionList(mselList, OpenMaya2.MFn.kTransform)
+
+        transformReturn = []
+
+        while not mselList_It.isDone():
+            transform = mselList_It.getDagPath()
+            transform_mfn = OpenMaya2.MFnTransform(transform)
+
+            for i in range(transform_mfn.attributeCount()):
+                transform_attr = transform_mfn.attribute(i)  # MObject
+                transform_plug = transform_mfn.findPlug(transform_attr, True).info  # conect a plug
+                # review: recollect float attributes, int, and boolean. better only boolean
+                if transform_plug == '%s.%s' % (transform, attr) and transform_attr.apiType() == type:
+                    transformReturn.append(pm.PyNode(transform))
+                    break
+
+            mselList_It.next()
+
+        return transformReturn
+
+
+    @staticmethod
+    def listAttrTypes():
+        mSelList = OpenMaya2.MGlobal.getActiveSelectionList()
+
+        mSelIt = OpenMaya2.MItSelectionList(mSelList)
+
+        while not mSelIt.isDone():
+
+            transform = mSelIt.getDependNode()
+            mfnTransform = OpenMaya2.MFnDependencyNode(transform)
+
+            print transform
+
+            for i in range(mfnTransform.attributeCount()):
+                transformAttr = mfnTransform.attribute(i)
+                transformAttr_plug = mfnTransform.findPlug(transformAttr, True)
+                print ('%s is type: %s' % (transformAttr_plug.info, transformAttr.apiTypeStr))
+
+            mSelIt.next()
+
+
+    @staticmethod
+    def getSingleSourceObjectFromPlug(plug):
+        """
+            plug: attribute MObject
+            Returns: MObject
+        """
+        if plug.isConnected():
+            # Get connected input plugs
+            connections = OpenMaya2.MPlugArray()
+            plug.connectedTo(connections, True, False)
+
+            # Find input transform
+            if connections.length() == 1:
+                return connections[0].node()
+
+        return None
+
+
+    @staticmethod
+    def getFnFromPlug(plug, fnType):
+        """
+            plug: attribute MObject
+            fnType: type object
+            Returns: dagPath of object type
+        """
+        node = APIHelp.getSingleSourceObjectFromPlug(plug)
+
+        # Get Fn from a DAG path to get the world transformations correctly
+        if node is not None:
+            path = OpenMaya2.MDagPath()
+            trFn = OpenMaya2.MFnDagNode(node)
+            trFn.getPath(path)
+
+            path.extendToShape()
+
+            if path.node().hasFn(fnType):
+                return path
+
+        return None
 
 #######################
 ##Deformer operations##

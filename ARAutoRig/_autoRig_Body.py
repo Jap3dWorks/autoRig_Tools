@@ -4,7 +4,7 @@ from maya import OpenMaya
 
 from ..ARCore import ARCore as ARC
 from ..ARCore import ARHelper as ARH
-from AutoRig_Abstract import _ARAutoRig_Abstract
+from _autoRig_Abstract import _ARAutoRig_Abstract
 
 import logging
 logging.basicConfig()

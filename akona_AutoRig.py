@@ -4,9 +4,7 @@ import pymel.core as pm
 import re
 
 import ARAutoRig
-reload(ARAutoRig)  # review: delete
 import ARCore
-reload(ARCore)
 
 def import_model(path='D:/_docs/_Animum/Akona/skinCluster/akona_skinPSD_d_facial.ma'):
     cmds.file(new=True, force=True)
@@ -16,7 +14,7 @@ def import_model(path='D:/_docs/_Animum/Akona/skinCluster/akona_skinPSD_d_facial
 
 def akonaRigA_Body(name='akona', path='D:/_docs/_Animum/Akona'):
     # spine Head
-    akonaRig = ARAutoRig.ARAutoRig_Body.ARAutoRig_Body(chName=name, path=path)  # create object
+    akonaRig = ARAutoRig.ARAutoRig_Body(chName=name, path=path)  # create object
     # spine
     akonaRig.spine_auto('spine', lambda: akonaRig.addCluster('chest_cluster', akonaRig._spineIKControllerList[-2], 'chest_cluster'),
                         lambda: akonaRig.addCluster('belly_cluster', akonaRig._spineIKControllerList[1], 'belly_cluster'))
@@ -77,7 +75,7 @@ def akonaRigA_Face(name='akona', path='D:/_docs/_Animum/Akona'):
     :param path:
     :return:
     """
-    akonaRig = ARAutoRig.ARAutoRig_Face.ARAutoRig_Face(chName=name, path=path)  # create object
+    akonaRig = ARAutoRig.ARAutoRig_Face(chName=name, path=path)  # create object
 
     # wire lips
     lipsDef=["face_lips_Upper", "face_lips_lower"]
