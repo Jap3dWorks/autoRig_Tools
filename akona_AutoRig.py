@@ -102,3 +102,14 @@ def akonaRigA_Face(name='akona', path='D:/_docs/_Animum/Akona'):
     # wire eyeBrow
     akonaRig.wires_auto("face_left_browIn_def_wire", "facialRig_mesh", None, 0.3)
     akonaRig.wires_auto("face_right_browIn_def_wire", "facialRig_mesh", None, 0.3)
+
+
+def main():
+    import autoRig_Tools
+
+    ## launch autoRig ##
+    reload(autoRig_Tools)
+    akona_AR = autoRig_Tools.akona_AutoRig
+    akona_AR.import_model("D:/_docs/_Animum/Akona/skinCluster/FacialJoints/akona_skin_facial41.ma")
+    # akona_AR.akonaRigA_Body()
+    akona_AR.akonaRigA_Face()

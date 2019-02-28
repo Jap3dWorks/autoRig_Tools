@@ -554,9 +554,9 @@ class APIHelp:
 #######################
 class DeformerOp:
 
-    class BlendShapesOP:
+    class WeightsOP:
         def __init__(self):
-            self._BSWeights = None
+            self._weights = None
             self._symetryWeights = None
             self._symetryID = None
 
@@ -565,8 +565,8 @@ class DeformerOp:
             shrink the vertex weight values
             :return:
             """
-            for i in range(self._BSWeights.length()):
-                self._BSWeights[i] = self._BSWeights[i] * self._BSWeights[i]
+            for i in range(self._weights.length()):
+                self._weights[i] = self._weights[i] * self._weights[i]
 
 
         def inverValues(self):
@@ -574,8 +574,8 @@ class DeformerOp:
             Invert vertex weight values
             :return:
             """
-            for i in range(self._BSWeights.length()):
-                self._BSWeights[i] = 1.0 - self._BSWeights[i]
+            for i in range(self._weights.length()):
+                self._weights[i] = 1.0 - self._weights[i]
 
 
         def setSymetryData(self, mesh, axis="x"):
@@ -595,16 +595,48 @@ class DeformerOp:
             :param BSNode:
             :return:
             """
-            oldWeights = OpenMaya.MFloatArray(self._BSWeights)
+            oldWeights = OpenMaya.MFloatArray(self._weights)
             for i in range(oldWeights.length()):
                 newWeight = 0.0
                 for j, axis in enumerate("xyz"):
                     newWeight += getattr(self._symetryWeights[i], axis) * oldWeights[self._symetryID[i * 3 + j]]
 
-                self._BSWeights[i] = newWeight
+                self._weights[i] = newWeight
 
 
-        def setBlendSWeights(self, BSNode):
+        def setWeights(self, node):
+            """
+            Method to apply the current weights in the buffer
+            :param node:
+            :return:
+            """
+            # check type
+            node = pm.PyNode(node) if isinstance(node, str) else node
+
+            if isinstance(node, pm.nodetypes.BlendShape):
+                self._setWeights_BS(node)
+
+            else:
+                self._setWeights_DEF(node)
+
+
+        def getWeights(self, node):
+            """
+            Method to get the current weights in the buffer
+            :param node:
+            :return:
+            """
+            # check type
+            node = pm.PyNode(node) if isinstance(node, str) else node
+
+            if isinstance(node, pm.nodetypes.BlendShape):
+                self._getWeights_BS(node)
+
+            else:
+                self._getWeights_DEF(node)
+
+
+        def _setWeights_BS(self, BSNode):
             """
             Set the Blend shape weights with the float array values
             :param BSNode:
@@ -612,15 +644,15 @@ class DeformerOp:
             """
             arraySize, weightAttr = self._setGetCommon(BSNode)
 
-            if arraySize != self._BSWeights.length():
+            if arraySize != self._weights.length():
                 logger.info("mFloatArray do not has the correct size")
                 return
 
             for i in range(arraySize):
-                weightAttr[i].set(self._BSWeights[i])
+                weightAttr[i].set(self._weights[i])
 
 
-        def getBlendSWeights(self, BSNode):
+        def _getWeights_BS(self, BSNode):
             """
             Get the blend shape node weights per vertex
             :param BSNode:
@@ -629,13 +661,13 @@ class DeformerOp:
             arraySize, weightAttr = self._setGetCommon(BSNode)
 
             # set the array with the total of points, mFloatArray is faster
-            self._BSWeights = OpenMaya.MFloatArray(arraySize, 0.0)
+            self._weights = OpenMaya.MFloatArray(arraySize, 0.0)
 
             for i in range(arraySize):
-                self._BSWeights.set(weightAttr[i].get(), i)
+                self._weights.set(weightAttr[i].get(), i)
 
 
-        def _setGetCommon(self, BSNode):
+        def _setGetCommon_BS(self, BSNode):
             """
             Common between get and set bs weights
             must call plug_weight.destructHandle(dataHandle) at the end
@@ -648,6 +680,57 @@ class DeformerOp:
             weightAttr = pm.PyNode('%s.inputTarget[0].baseWeights' % BSNode)
 
             return arraySize, weightAttr
+
+
+        def _setWeights_DEF(self, node):
+            """
+            set weights for deformer objects no blend shape
+            :param node:
+            :return:
+            """
+            weightGeometryFilter, arraySize, components, dagPath = self._setGetCommon_DEF(node)
+
+            weightGeometryFilter.setWeight(dagPath, components, self._weights)
+
+
+        def _getWeights_DEF(self, node):
+            """
+            Get the weights map of a deformer
+            :param node:
+            :return:
+            """
+            weightGeometryFilter, arraySize, components, dagPath = self._setGetCommon_DEF(node)
+
+            self._weights = OpenMaya.MFloatArray(arraySize, 0.0)
+            weightGeometryFilter.getWeights(0, components, self._weights)  # review documentation
+
+
+
+        def _setGetCommon_DEF(self, node):
+            """
+            Common Operations between get ans set for deformers
+            :param node:
+            :return:
+            """
+            # get cluster
+            mSelection = OpenMaya.MSelectionList()
+            mSelection.add(str(node))
+            # deformer
+            deformerMObject = OpenMaya.MObject()
+            mSelection.getDependNode(0, deformerMObject)
+
+            # weight mfn
+            weightGeometryFilter = OpenMayaAnim.MFnWeightGeometryFilter(deformerMObject)
+            membersSelList = OpenMaya.MSelectionList()
+            fnSet = OpenMaya.MFnSet(weightGeometryFilter.deformerSet())  # set components affected
+            fnSet.getMembers(membersSelList, False)  # add to selection list
+            dagPathComponents = OpenMaya.MDagPath()
+            components = OpenMaya.MObject()
+            membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
+            # get original weights
+            arraySize = OpenMaya.MFnMesh(dagPathComponents).numVertices()
+            
+            return weightGeometryFilter, arraySize, components, dagPathComponents
 
 
     @staticmethod
@@ -928,9 +1011,6 @@ class DeformerOp:
         :param mesh2(str): mesh shape where copy weights
         :return:
         """
-        # util
-        util = OpenMaya.MScriptUtil()
-
         # get cluster
         mSelection = OpenMaya.MSelectionList()
         mSelection.add(deformer)
@@ -981,6 +1061,8 @@ class DeformerOp:
             TVid = targetIt.index()
             TargetPoint = targetIt.position()
             closestPoint = OpenMaya.MPoint()
+            # util
+            util = OpenMaya.MScriptUtil()
             ptr = util.asIntPtr()
             sourceMFn.getClosestPoint(TargetPoint, closestPoint, OpenMaya.MSpace.kObject, ptr)
             polyId = util.getInt(ptr)
@@ -1064,6 +1146,7 @@ class DeformerOp:
                 break
         print newWeights
         weightGeometryFilter.setWeight(targetNewWDPath, components, newWeights)
+
 
     @staticmethod
     def getSkinedMeshFromJoint(joint):
