@@ -556,9 +556,13 @@ class DeformerOp:
 
     class WeightsOP:
         def __init__(self):
+            # weights buffer
             self._weights = None
+            # data to calculate symmetric weights, with barycentric coords
             self._symetryWeights = None
+            # list with symmetric index vertex, 3 vertices for each vertex, to apply correct the barycentric weights
             self._symetryID = None
+
 
         def shrinkWeight(self):
             """
@@ -705,7 +709,6 @@ class DeformerOp:
             weightGeometryFilter.getWeights(0, components, self._weights)  # review documentation
 
 
-
         def _setGetCommon_DEF(self, node):
             """
             Common Operations between get ans set for deformers
@@ -729,7 +732,7 @@ class DeformerOp:
             membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
             # get original weights
             arraySize = OpenMaya.MFnMesh(dagPathComponents).numVertices()
-            
+
             return weightGeometryFilter, arraySize, components, dagPathComponents
 
 
@@ -1011,6 +1014,10 @@ class DeformerOp:
         :param mesh2(str): mesh shape where copy weights
         :return:
         """
+        # check if is pymel node, if it is, convert to str
+        deformer = str(deformer) if isinstance(deformer, pm.general.PyNode) else deformer
+        mesh = str(mesh) if isinstance(mesh, pm.general.PyNode) else mesh
+
         # get cluster
         mSelection = OpenMaya.MSelectionList()
         mSelection.add(deformer)
@@ -1026,10 +1033,16 @@ class DeformerOp:
         fnSet.getMembers(membersSelList, False)  # add to selection list
         dagPathComponents = OpenMaya.MDagPath()
         components = OpenMaya.MObject()
-        membersSelList.getDagPath(0, dagPathComponents, components)  # first element deformer set
-        # get original weights
+        memberSelLength = membersSelList.length()  # get the last member, it should be the first object deformed
+        membersSelList.getDagPath(memberSelLength-1, dagPathComponents, components)  # first element deformer set
+        # get original weights0
         originalWeight = OpenMaya.MFloatArray()
         weightGeometryFilter.getWeights(0, components, originalWeight)  # review documentation
+
+        # ## test components
+        # logger.debug("member set list: %s" % membersSelList.length())
+        # logger.debug("reference object: %s" % dagPathComponents.fullPathName())
+        # return
 
         # get target mfn and all point positions
         targetDPath = OpenMaya.MDagPath()
@@ -1144,7 +1157,7 @@ class DeformerOp:
             PaintSelList.getDagPath(i, targetNewWDPath, components)
             if targetNewWDPath.partialPathName() == targetDPath.partialPathName():
                 break
-        print newWeights
+        logger.debug(newWeights)
         weightGeometryFilter.setWeight(targetNewWDPath, components, newWeights)
 
 

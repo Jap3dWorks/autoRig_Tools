@@ -12,17 +12,17 @@ logger.setLevel(logging.DEBUG)
 class _ARAutoRig_Abstract(object):
     def __init__(self, chName, path):
         """
-        autoRig class tools
+        pure abstract autoRig class tools
         """
         # TODO: create node Module or chName_rig_grp transform node with messages attributes to store connections
-        self._chName = chName
-        self._path = path
+        self._chName = chName  # name of the character
+        self._path = path  # path where find the controllers .json library
 
         # private attributes
-        self._lastZone=""
-        self._lastSide=""
+        self._lastZone = ""  # store the last created zone
+        self._lastSide = ""  # store the last created side, useful for ikfk systems for example
         # skin joints name marker
-        self._skinJointNaming = "skin_joint"
+        self._skinJointNaming = "skin_joint"  # naming of an skin joint
 
         # create necessary groups
         # check if noXform exist

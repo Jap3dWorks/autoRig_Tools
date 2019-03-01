@@ -15,7 +15,8 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
     Class to construct facial rig
     """
     def __init__(self, chName, path):
-        self.controllers = {}
+        self.controllers = {}  # dict with controllers created
+        self.sysObj = {}  # dict with interest sys obj, sometimes it 's helpful to add extra functions
 
         super(ARAutoRig_Face, self).__init__(chName, path)
 
@@ -28,13 +29,16 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         :param skinSample: mesh with a skin cluster, TODO: get shample from deformer too
         :param :
         :return:
+
+        self.controllers: store controllers
+        self.sysObj: store planes (mesh) that drive the auto grps
         """
         deformer = pm.PyNode(deformer) if isinstance(deformer, str) else deformer
 
         # base name
         baseName = str(deformer).split("_")[:-2]
         baseName = "_".join(baseName)
-        print baseName
+        logger.debug("wire auto: %s" % baseName)
 
         # if no parent, create a empty grp to use
         if not parent:
@@ -57,18 +61,31 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         # parent controllers
         pm.parent(controllers, parent)
         pm.parent(baseCurveGrps, self._noXformGrp)
+
         # controller shape
         for ctr in controllers:
-            sphere = pm.sphere(r=sizeCtr, ch=False)[0]
-            ctr.addChild(sphere.getShape(), r=True, s=True)
-            pm.delete(sphere)
+            if customCtr == "circle":
+                # a custom ctr
+                ctrTemp = pm.circle(r=sizeCtr, nr=(0,1,0), ch=False)[0]
+
+            elif customCtr == None:
+                # a nurbs shpere
+                ctrTemp = pm.sphere(r=sizeCtr, ch=False)[0]
+
+            else:
+                # a custom ctr
+                ctrTemp = self._create_controller("%s_base_ctr" % baseName, customCtr, 5)
+
+            ctr.addChild(ctrTemp.getShape(), r=True, s=True)
+
+            pm.delete(ctrTemp)
 
         # roots and auto grps
         ARC.createRoots(controllers, "root")
         auto = ARC.createRoots(controllers, "auto")
 
         # create a small plane per point, then combine them
-        planes=[]
+        planes = []
         for ctr in controllers:
             plane = pm.polyPlane(h=0.01, w=0.01, sh=1, sw=1, ch=False)[0]
             plane.setTranslation(ctr.getTranslation("world"), "world")
@@ -76,8 +93,8 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
 
         # combine planes
         planes = pm.polyUnite(planes, ch=False, mergeUVSets=True)[0]
-        planes.rename("%s_planes" % baseName)
-        self._noXformGrp.addChild(planes)  # save to noXform
+        planes.rename("%s_planes" % baseName)  # rename
+        self._noXformGrp.addChild(planes)  # parent to noXform
         pm.polyAutoProjection(planes, ch=False, lm=0, pb=0, ibd=1, cm=0, l=2, sc=1, o=1, p=6, ps=0.2, ws=0)
 
         if skinSample:
@@ -109,3 +126,4 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
 
         # save data
         self.controllers[baseName]=controllers
+        self.sysObj[baseName]=planes
