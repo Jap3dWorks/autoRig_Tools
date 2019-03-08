@@ -1003,7 +1003,7 @@ class DeformerOp:
 
 
     @staticmethod
-    def addToDeformer(deformer, mesh):
+    def addToDeformer(deformer, mesh, source=None):
         # TODO: move to ARCore necessary to
         # documentation: https://groups.google.com/forum/#!topic/python_inside_maya/E7QirW4Z0Nw
         # documentation: https://help.autodesk.com/view/MAYAUL/2018/ENU/?guid=__cpp_ref_class_m_fn_set_html  # mfnSet
@@ -1034,7 +1034,14 @@ class DeformerOp:
         dagPathComponents = OpenMaya.MDagPath()
         components = OpenMaya.MObject()
         memberSelLength = membersSelList.length()  # get the last member, it should be the first object deformed
-        membersSelList.getDagPath(memberSelLength-1, dagPathComponents, components)  # first element deformer set
+        if source:
+            for i in range(memberSelLength):
+                membersSelList.getDagPath(memberSelLength-1, dagPathComponents, components)  # first element deformer set
+                if dagPathComponents.partialPathName() == source:
+                    break
+
+        else:
+            membersSelList.getDagPath(memberSelLength-1, dagPathComponents, components)  # first element deformer set
         # get original weights0
         originalWeight = OpenMaya.MFloatArray()
         weightGeometryFilter.getWeights(0, components, originalWeight)  # review documentation
@@ -1178,6 +1185,21 @@ class DeformerOp:
             meshes += skin.getGeometry()
 
         return set(meshes)
+
+
+    @staticmethod
+    def mirrorCluster(cluster, symmetry=[-1,0,0]):
+        """
+        create a cluster, symetric to the input cluster. and apply symmetric weights
+        :param cluster:
+        :return:
+        """
+        # check type
+        cluster = pm.PyNode(cluster) if isinstance(cluster, str) else cluster
+        symmetry = pm.datatypes(symmetry) if isinstance(symmetry, list) else symmetry
+
+
+
 
 
 def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
