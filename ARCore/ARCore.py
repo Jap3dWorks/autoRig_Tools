@@ -1039,7 +1039,6 @@ class DeformerOp:
                 membersSelList.getDagPath(memberSelLength-1, dagPathComponents, components)  # first element deformer set
                 if dagPathComponents.partialPathName() == source:
                     break
-
         else:
             membersSelList.getDagPath(memberSelLength-1, dagPathComponents, components)  # first element deformer set
         # get original weights0
@@ -1187,6 +1186,7 @@ class DeformerOp:
         return set(meshes)
 
 
+
     @staticmethod
     def mirrorCluster(cluster, symmetry=[-1,0,0]):
         """
@@ -1197,6 +1197,8 @@ class DeformerOp:
         # check type
         cluster = pm.PyNode(cluster) if isinstance(cluster, str) else cluster
         symmetry = pm.datatypes(symmetry) if isinstance(symmetry, list) else symmetry
+
+        # defMesh = cluster.
 
 
 
