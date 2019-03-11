@@ -63,8 +63,8 @@ def akonaRigA_Face():
 
     ## wire lips
     lipsDef=["face_lips_Upper", "face_lips_lower"]
-    akonaRig.wires_auto(lipsDef[0] + "_def_wire", None, 0.3)
-    akonaRig.wires_auto(lipsDef[1] + "_def_wire", None, 0.3)
+    akonaRig.wires_auto(lipsDef[0] + "_def_wire", None, 0.3, None,True)
+    akonaRig.wires_auto(lipsDef[1] + "_def_wire", None, 0.3, None,True)
 
     # TODO: make a method move controller, in the normal direction of the surface, distance equal to the inner controller
     for lip in lipsDef:
@@ -85,8 +85,8 @@ def akonaRigA_Face():
 
     ## wire eyeBrow
     browsZone = ["face_left_browIn", "face_right_browIn"]
-    akonaRig.wires_auto(browsZone[0] + "_def_wire",  None, 0.3)
-    akonaRig.wires_auto(browsZone[1]+"_def_wire", None, 0.3)
+    akonaRig.wires_auto(browsZone[0] + "_def_wire",  None, 0.3, None, True)
+    akonaRig.wires_auto(browsZone[1]+"_def_wire", None, 0.3, None, True)
 
     ## general face wire
     faceZone = "face_face"

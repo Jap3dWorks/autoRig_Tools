@@ -28,7 +28,7 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         super(ARAutoRig_Face, self).__init__(chName, path)
 
 
-    def wires_auto(self, deformer, parent=None, sizeCtr=0.5, customCtr=None):
+    def wires_auto(self, deformer, parent=None, sizeCtr=0.5, customCtr=None, ctrFollow=False):
         """
         This method configure a wire deform for facial rigs.
         The wire must be created and painted previously.
@@ -53,15 +53,23 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         curveBaseW = deformer.baseWire.inputs(p=True)[0].node()
         curve = deformer.deformedWire.inputs(p=True)[0].node()
 
-
         # parent the curves to no xform grp
         self._noXformGrp.addChild(curve)
         self._noXformGrp.addChild(curveBaseW)
 
         # create driver groups
         # create transforms to drive the curve
-        controllers = ARC.transformDriveNurbObjectCV(curve)
-        baseCurveGrps=ARC.transformDriveNurbObjectCV(curveBaseW)
+        controllers = ARC.transformDriveNurbObjectCV(curve, ctrFollow)
+        baseCurveGrps = ARC.transformDriveNurbObjectCV(curveBaseW, ctrFollow)
+        if ctrFollow:
+            for i in range(len(controllers)):
+                matrix = ARC.VectorMath.orientToPlane(controllers[i].getMatrix(), "zx")
+                if matrix[3][0] < 0:
+                    matrix[0] = matrix[0] * -1
+
+                controllers[i].setMatrix(matrix)
+                baseCurveGrps[i].setMatrix(matrix)
+                logger.debug("align to plane")
 
         # parent controllers
         pm.parent(controllers, parent)

@@ -1314,7 +1314,7 @@ def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
     return vertexIndexes
 
 
-def transformDriveNurbObjectCV(nurbObject):
+def transformDriveNurbObjectCV(nurbObject, follow=False):
     """
     Connect transformations to each Curve Vertex point
     :param curve(str or pm):
@@ -1335,6 +1335,21 @@ def transformDriveNurbObjectCV(nurbObject):
         decomposeMatrix = pm.createNode('decomposeMatrix')
         transform.worldMatrix[0].connect(decomposeMatrix.inputMatrix)
         decomposeMatrix.outputTranslate.connect(nurbObject.controlPoints[n])
+        if isinstance(nurbObject, pm.nodetypes.NurbsCurve) and follow:
+            closest = nurbObject.closestPoint(transform.getTranslation("world"), tolerance=0.1, space="world")
+            param = nurbObject.getParamAtPoint(closest, "world")
+
+            tangent = nurbObject.tangent(min(max(nurbObject.minValue.get()+0.0001, param),nurbObject.maxValue.get()-0.0001))
+            tangent.normalize()
+            normal = nurbObject.normal(min(max(nurbObject.minValue.get()+0.0001, param),nurbObject.maxValue.get()-0.0001))
+            normal.normalize()
+            biNormal = tangent ^ normal
+            biNormal.normalize()
+
+            matrix = pm.datatypes.Matrix(tangent, biNormal, -normal, transform.getTranslation("world"))
+
+            transform.setMatrix(matrix)
+
         transforms.append(transform)
 
     return transforms
@@ -2565,7 +2580,7 @@ class VectorMath():
 
 
     @staticmethod
-    def orientToPlane(matrix, plane=None, respectAxis=None):
+    def orientToPlane(matrix, plane=None):
         """
         Conserve the general orient of a matrixTransform, but aligned to a plane.
         option to select the respect axis
@@ -2580,14 +2595,17 @@ class VectorMath():
             logger.info('insert a valid plane')
             return matrix
 
+        # check matrix type
+        matrix = checkMatrixType(matrix)
+
         axisList = 'xyz'
 
         vectors = {}
         vIndex = 0
         # store initial vectors
         for axis in axisList:
-            vectors[axis] = OpenMaya.MVector(matrix[vIndex], matrix[vIndex + 1], matrix[vIndex + 2])
-            vIndex += 4
+            vectors[axis] = OpenMaya.MVector(matrix[vIndex][0],matrix[vIndex][1],matrix[vIndex][2])
+            vIndex += 1
 
         # compare dot products, and find the nearest vector to plane vector
         planeVector = [0 if axis in plane else 1 for axis in axisList]  # plane vector (1,0,0) or (0,1,0) or (0,0,1)
@@ -2628,10 +2646,10 @@ class VectorMath():
         vectors[resetPlane[1]].normalize()  # normalize
 
         returnMatrix = pm.datatypes.Matrix(
-            [vectors[axisList[0]].x, vectors[axisList[0]].y, vectors[axisList[0]].z, matrix[3],
-             vectors[axisList[1]].x, vectors[axisList[1]].y, vectors[axisList[1]].z, matrix[7],
-             vectors[axisList[2]].x, vectors[axisList[2]].y, vectors[axisList[2]].z, matrix[11],
-             matrix[12], matrix[13], matrix[14], matrix[15]])
+             [vectors[axisList[0]].x, vectors[axisList[0]].y, vectors[axisList[0]].z, matrix[0][3]],
+             [vectors[axisList[1]].x, vectors[axisList[1]].y, vectors[axisList[1]].z, matrix[1][3]],
+             [vectors[axisList[2]].x, vectors[axisList[2]].y, vectors[axisList[2]].z, matrix[2][3]],
+             [matrix[3][0], matrix[3][1], matrix[3][2], matrix[3][3]])
 
         return returnMatrix
 
