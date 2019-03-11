@@ -103,6 +103,7 @@ class SaveLoadControls(dict):
 
         logger.info('%s %s controller saved at: %s' % (self.name, typeController, self._controllerFile))
 
+
     @staticmethod
     def ctrLoadJson(typeController, name, path, SFactor=1, ColorIndex = 4):
         """
@@ -209,12 +210,15 @@ def saveControllersSelection():
     for sel in selection:
         cmds.select(sel, r=True)
         try:
-            autoRig_Tools.ctrSaveLoadToJson.ctrSaveJson(sel,'akona', 'D:\_docs\_Animum\Akona')
+            saveCtr = autoRig_Tools.ARCore.ctrSaveLoadToJson.SaveLoadControls('akona', 'D:\_docs\_Animum\Akona')
+            saveCtr.ctrSaveJson(sel)
         except:
+            print "error writing"
             pass
         cmds.select(cl=True)
 
 saveControllersSelection()
+
 
 # import controllers
 selection = cmds.ls(sl=True)

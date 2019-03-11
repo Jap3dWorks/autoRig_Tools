@@ -12,9 +12,13 @@ def import_model(path='D:/_docs/_Animum/Akona/skinCluster/akona_skinPSD_d_facial
     # cmds.setAttr('akona_model_grp.visibility', True)
 
 
-def akonaRigA_Body(name='akona', path='D:/_docs/_Animum/Akona'):
+FACIAL_SHAPE = "facialRig_meshShape"
+NAME = "akona"
+PATH = "D:/_docs/_Animum/Akona"
+
+def akonaRigA_Body():
     # spine Head
-    akonaRig = ARAutoRig.ARAutoRig_Body(chName=name, path=path)  # create object
+    akonaRig = ARAutoRig.ARAutoRig_Body(chName=NAME, path=PATH)  # create object
     # spine
     akonaRig.spine_auto('spine', lambda: akonaRig.addCluster('chest_cluster', akonaRig._spineIKControllerList[-2], 'chest_cluster'),
                         lambda: akonaRig.addCluster('belly_cluster', akonaRig._spineIKControllerList[1], 'belly_cluster'))
@@ -48,19 +52,19 @@ def akonaRigA_Body(name='akona', path='D:/_docs/_Animum/Akona'):
     akonaRig.addCluster('skirtLapel_left_cluster', 'skirtB2_left_point_ctr', 'pole', .5)
 
 
-def akonaRigA_Face(name='akona', path='D:/_docs/_Animum/Akona'):
+def akonaRigA_Face():
     """
     Func runs the facial rig
     :param name:
     :param path:
     :return:
     """
-    akonaRig = ARAutoRig.ARAutoRig_Face(chName=name, path=path)  # create object
+    akonaRig = ARAutoRig.ARAutoRig_Face(NAME, PATH, FACIAL_SHAPE)  # create object
 
     ## wire lips
     lipsDef=["face_lips_Upper", "face_lips_lower"]
-    akonaRig.wires_auto(lipsDef[0] + "_def_wire", "facialRig_mesh", None, 0.3)
-    akonaRig.wires_auto(lipsDef[1] + "_def_wire", "facialRig_mesh", None, 0.3)
+    akonaRig.wires_auto(lipsDef[0] + "_def_wire", None, 0.3)
+    akonaRig.wires_auto(lipsDef[1] + "_def_wire", None, 0.3)
 
     # TODO: make a method move controller, in the normal direction of the surface, distance equal to the inner controller
     for lip in lipsDef:
@@ -81,19 +85,40 @@ def akonaRigA_Face(name='akona', path='D:/_docs/_Animum/Akona'):
 
     ## wire eyeBrow
     browsZone = ["face_left_browIn", "face_right_browIn"]
-    akonaRig.wires_auto(browsZone[0] + "_def_wire", "facialRig_mesh", None, 0.3)
-    akonaRig.wires_auto(browsZone[1]+"_def_wire", "facialRig_mesh", None, 0.3)
+    akonaRig.wires_auto(browsZone[0] + "_def_wire",  None, 0.3)
+    akonaRig.wires_auto(browsZone[1]+"_def_wire", None, 0.3)
 
     ## general face wire
     faceZone = "face_face"
-    akonaRig.wires_auto(faceZone+"_def_wire", "facialRig_mesh", None, 15, "circle")
+    akonaRig.wires_auto(faceZone+"_def_wire", None, 15, "circle")
     # hide first and last
     pm.delete(akonaRig.controllers[faceZone][0].getShape())
     pm.delete(akonaRig.controllers[faceZone][-1].getShape())
 
     ## project deformers, to drive brows and lips from face wire
     for i in [lipsDef[0], lipsDef[1], browsZone[0], browsZone[1]]:
-        ARCore.ARCore.DeformerOp.addToDeformer(faceZone+"_def_wire", akonaRig.sysObj[i])
+        ARCore.ARCore.DeformerOp.addToDeformer(faceZone+"_def_wire", akonaRig.sysObj[i], FACIAL_SHAPE)
+
+    ## facial clusters ##
+    clusterNulls=["face_left_cheekbone_def_cls_null", "face_left_cheek_def_cls_null", "face_left_sneer_def_cls_null"]
+    clusters = ["face_left_cheekbone", "face_left_cheek", "face_left_sneer"]
+    for i in range(len(clusterNulls)):
+        akonaRig.addCluster(clusters[i] + "_def_cls", None, .5, clusterNulls[i], False, False)
+        akonaRig.addCluster(clusters[i]+ "_def_cls", None, .5, clusterNulls[i], True, True)
+
+    #move shapes
+    for ctr in [akonaRig.controllers[clusters[1]], akonaRig.controllers[clusters[1].replace("left", "right")]]:
+        ctrShape = ctr.getShape()
+        shapeP = ctrShape.getCVs()
+        for i in range(len(shapeP)):
+            shapeP[i] += (0, 0, 2.3)
+        ctrShape.setCVs(shapeP)
+
+    # control clusters with wire
+    for clster in clusters:
+        ARCore.ARCore.DeformerOp.addToDeformer(faceZone+"_def_wire", akonaRig.sysObj[clster], FACIAL_SHAPE)
+        clster = clster.replace("left", "right")
+        ARCore.ARCore.DeformerOp.addToDeformer(faceZone+"_def_wire", akonaRig.sysObj[clster], FACIAL_SHAPE)
 
 
 def hideElements():
@@ -119,6 +144,10 @@ def hideElements():
     # ctr Sets
     controllers = cmds.ls('*_ctr')
     cmds.sets(controllers, name='controllers_set')
+
+    # del _null objs
+    nullObjs = cmds.ls("*_null")
+    cmds.delete(nullObjs)
 
 
 def main():

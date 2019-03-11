@@ -49,6 +49,10 @@ def createRoots(listObjects, suffix='root'):
     Returns:
         roots(list): list of roots
     """
+    # check type
+    if not isinstance(listObjects, list):
+        listObjects = [listObjects]
+
     roots = []
     for arg in listObjects:
         try:
@@ -1012,6 +1016,7 @@ class DeformerOp:
         Add a mesh to the deformer, and copy weights between the new mesh and the existent mesh in the deformer
         :param deformer(str): deformer name
         :param mesh2(str): mesh shape where copy weights
+        :param source (str): mesh with weights
         :return:
         """
         # check if is pymel node, if it is, convert to str
@@ -1036,11 +1041,14 @@ class DeformerOp:
         memberSelLength = membersSelList.length()  # get the last member, it should be the first object deformed
         if source:
             for i in range(memberSelLength):
-                membersSelList.getDagPath(memberSelLength-1, dagPathComponents, components)  # first element deformer set
+                membersSelList.getDagPath(i, dagPathComponents, components)  # first element deformer set
                 if dagPathComponents.partialPathName() == source:
+                    print "Mesh with weights: %s" % dagPathComponents.partialPathName()
                     break
         else:
             membersSelList.getDagPath(memberSelLength-1, dagPathComponents, components)  # first element deformer set
+
+        print "Mesh %s" % dagPathComponents.partialPathName()
         # get original weights0
         originalWeight = OpenMaya.MFloatArray()
         weightGeometryFilter.getWeights(0, components, originalWeight)  # review documentation
@@ -1083,7 +1091,7 @@ class DeformerOp:
             # util
             util = OpenMaya.MScriptUtil()
             ptr = util.asIntPtr()
-            sourceMFn.getClosestPoint(TargetPoint, closestPoint, OpenMaya.MSpace.kObject, ptr)
+            sourceMFn.getClosestPoint(TargetPoint, closestPoint, OpenMaya.MSpace.kObject, ptr)  # review kworld
             polyId = util.getInt(ptr)
 
             # get vertices from face id
@@ -1186,22 +1194,64 @@ class DeformerOp:
         return set(meshes)
 
 
-
     @staticmethod
-    def mirrorCluster(cluster, symmetry=[-1,0,0]):
+    def mirrorCluster(cluster, symmetry="x"):
         """
-        create a cluster, symetric to the input cluster. and apply symmetric weights
-        :param cluster:
-        :return:
+        create a cluster, symmetric to the input cluster. and symmetrize weights
+        :param cluster(str or pm): cluster deformer node
+        :return: symCluster, symClsterTrn, symClstrShp
         """
         # check type
         cluster = pm.PyNode(cluster) if isinstance(cluster, str) else cluster
-        symmetry = pm.datatypes(symmetry) if isinstance(symmetry, list) else symmetry
+        clusterTrn = cluster.matrix.inputs()[0]  # get clster trans
+        clusterShp = clusterTrn.getShape()  # get cluster Shp
 
-        # defMesh = cluster.
+        # create a invert vector
+        symVec = pm.datatypes.Vector([1,1,1])
+        for axis in "xyz":
+            if axis == symmetry:
+                setattr(symVec, axis, -1)
+                break
 
+        print symVec.x, symVec.y, symVec.z
 
+        defMesh = cluster.getGeometry()[0]
 
+        # get weiths from original cluster, and mirror it
+        weights = DeformerOp.WeightsOP()
+        weights.setSymetryData(defMesh, "x")
+        weights.getWeights(cluster)
+        weights.mirrorWeights()
+
+        symCluster, symClsterTrn = pm.cluster(defMesh) # fixme
+        weights.setWeights(symCluster)
+
+        # deformer order
+        pm.reorderDeformers(cluster, symCluster, defMesh)
+
+        symClstrShp = symClsterTrn.getShape()
+
+        # set origin, origin is the visual shape in the maya visor
+        origin = pm.datatypes.Vector(clusterShp.origin.get())
+        for axis in "xyz":
+            setattr(origin, axis, getattr(origin, axis) * getattr(symVec, axis))
+        # set origin
+        symClstrShp.origin.set(origin)
+
+        # apply pivots symmetry
+        for attr in ["rotatePivot", "scalePivot"]:
+            val = pm.datatypes.Vector(clusterTrn.attr(attr).get())
+            for axis in "xyz":
+                setattr(val, axis, getattr(val, axis) * getattr(symVec, axis))
+            symClsterTrn.attr(attr).set(val)
+
+        # set relative
+        symCluster.relative.set(cluster.relative.get())
+
+        # create root
+        createRoots(symClsterTrn)
+        # return cluster and dag nodes
+        return symCluster, symClsterTrn, symClstrShp
 
 
 def vertexIntoCurveCilinder(mesh, curve, distance, minParam=0, maxParam=1):
@@ -2587,9 +2637,9 @@ class VectorMath():
 
 
     @staticmethod
-    def reflectedMatrix(matrix, refMatrix=pm.datatypes.Matrix([-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1])):
+    def reflectedMatrix(matrix, flip=False, refMatrix=pm.datatypes.Matrix([-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1])):
         """
-        Return a reflected matrix, with no negative scales
+        Return a reflected matrix. If flip is false, with no degative scales
         :param matrix:
         :param refMatrix:
         :return:
@@ -2603,14 +2653,14 @@ class VectorMath():
         returnMatrix = matrix * refMatrix
 
         # compare determinants, this way avoid undesired flipped axis
-        for i in range(3):
-            if matrixDet != returnMatrix.det():
-                returnMatrix[i] *= -1
-            else:
-                break
+        if not flip:
+            for i in range(3):
+                if matrixDet != returnMatrix.det():
+                    returnMatrix[i] *= -1
+                else:
+                    break
 
         return returnMatrix
-
 
 
     @ staticmethod

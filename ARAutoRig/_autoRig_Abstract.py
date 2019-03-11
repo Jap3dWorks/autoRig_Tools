@@ -154,36 +154,37 @@ class _ARAutoRig_Abstract(object):
         return [], []
 
 
-    def addCluster(self, cluster, parent, controllerType, controllerSize=1.0):
+    def addCluster(self, ctrTrns, parent, ctrType, ctrSize=1.0, ctrNull=None, symCtr=False):
         """
         Take a cluster or create it, move it to the controller system, create a controller and vinculate
         :arg: cluster(str or pm): name of the cluster transform node
+        :arg: controllNull (str or pm): null point reference to construct the controller
         :return:
         """
         # cluster var type
-        if isinstance(cluster, str):
-            cluster = pm.PyNode(cluster)
+        ctrTrns = pm.PyNode(ctrTrns) if isinstance(ctrTrns, str) else ctrTrns
         # parent var type
-        if isinstance(parent, str):
-            parent = pm.PyNode(parent)
+        parent = pm.PyNode(parent) if isinstance(parent, str) else parent
+        if ctrNull:
+            ctrNull = pm.PyNode(ctrNull) if isinstance(ctrNull, str) else ctrNull
 
-        clusterMatrix = pm.xform(cluster, ws=True, m=True, q=True)
+        clusterMatrix = pm.xform(ctrTrns, ws=True, m=True, q=True)
 
         # look for cluster root
-        clusterRoot = cluster.getParent()
+        clusterRoot = ctrTrns.getParent()
         # check if parent is a root.
         if clusterRoot:
             rootMatrix = pm.xform(clusterRoot, ws=True, m=True, q=True)
             if rootMatrix == clusterMatrix and len(clusterRoot.listRelatives(c=True)) == 1:
                 pass
             else:
-                clusterRoot = ARC.createRoots([cluster])
+                clusterRoot = ARC.createRoots([ctrTrns])
         else:
-            clusterRoot = ARC.createRoots([cluster])
+            clusterRoot = ARC.createRoots([ctrTrns])
 
         # look if cluster is relative
         # we need cluster DGnode
-        clusterShape = cluster.getShape()
+        clusterShape = ctrTrns.getShape()
         clusterDG = clusterShape.clusterTransforms[0].outputs()[0]
         clusterDG.relative.set(True)
 
@@ -191,21 +192,32 @@ class _ARAutoRig_Abstract(object):
         clusterShape.visibility.set(False)
 
         # parent cluster root
-        parent.addChild(clusterRoot)
+        parent.addChild(clusterRoot)  # fixme
+        # self._noXformGrp.addChild(clusterRoot)
 
         # createController
-        controller = self._create_controller('%s_ctr' % str(cluster), controllerType, controllerSize, 24)
+        controller = self._create_controller('%s_ctr' % str(ctrTrns), ctrType, ctrSize, 24)
         # align with cluster, we need to query world space pivot
-        controller.setTranslation(cluster.getPivots(ws=True)[0], 'world')
-        #pm.xform(controller, ws=True, m=clusterMatrix)
+        if ctrNull:
+            matrix = pm.xform(ctrNull, ws=True, q=True, m=True)
+            if symCtr:
+                # reflected matrix
+                matrix = ARC.VectorMath.reflectedMatrix(matrix, True)
+
+            pm.xform(controller, ws=True, m=matrix)
+
+        else:
+            controller.setTranslation(ctrTrns.getPivots(ws=True)[0], 'world')
+
         #parent
         parent.addChild(controller)
         # create root
-        controllerRoot = ARC.createRoots([controller])
+        controllerRoot = ARC.createRoots(controller)
 
         # connect controllr and cluster
-        pm.parentConstraint(controller, cluster, maintainOffset=False, name='%s_parentConstraint' % str(cluster))
-        ARC.DGUtils.connectAttributes(controller, cluster, ['scale'], 'XYZ')
+        pm.parentConstraint(controller, ctrTrns, maintainOffset=True, name='%s_parCnstr' % str(ctrTrns))
+        # pm.scaleConstraint(controller, ctrTrns, maintainOffset=True, name='%s_sclCnstr' % str(ctrTrns))
+        ARC.DGUtils.connectAttributes(controller, ctrTrns, ['scale'], 'XYZ')
 
         return [controller], []
 

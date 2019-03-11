@@ -14,19 +14,25 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
     """
     Class to construct facial rig
     """
-    def __init__(self, chName, path):
+    def __init__(self, chName, path, meshShape):
         self.controllers = {}  # dict with controllers created
         self.sysObj = {}  # dict with interest sys obj, sometimes it 's helpful to add extra functions
+
+        meshShape = pm.PyNode(meshShape) if isinstance(meshShape, str) else meshShape
+        meshShape = meshShape.getShape if isinstance(meshShape, pm.nodetypes.Transform) else meshShape
+        self._MESH_SHAPE = meshShape
+
+        # util attributes
+        self._baseName = ""
 
         super(ARAutoRig_Face, self).__init__(chName, path)
 
 
-    def wires_auto(self, deformer, skinSample=None, parent=None, sizeCtr=0.5, customCtr=None):
+    def wires_auto(self, deformer, parent=None, sizeCtr=0.5, customCtr=None):
         """
         This method configure a wire deform for facial rigs.
         The wire must be created and painted previously.
         :param deformer:
-        :param skinSample: mesh with a skin cluster, TODO: get shample from deformer too
         :param :
         :return:
 
@@ -36,13 +42,12 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         deformer = pm.PyNode(deformer) if isinstance(deformer, str) else deformer
 
         # base name
-        baseName = str(deformer).split("_")[:-2]
-        baseName = "_".join(baseName)
-        logger.debug("wire auto: %s" % baseName)
+        self._baseName = str(deformer).split("_")[:-2]
+        self._baseName = "_".join(self._baseName)
 
         # if no parent, create a empty grp to use
         if not parent:
-            parent = pm.group(empty=True, name="%s_grp" % baseName)
+            parent = pm.group(empty=True, name="%s_grp" % self._baseName)
             self._ctrGrp.addChild(parent)
 
         curveBaseW = deformer.baseWire.inputs(p=True)[0].node()
@@ -62,49 +67,104 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         pm.parent(controllers, parent)
         pm.parent(baseCurveGrps, self._noXformGrp)
 
-        # controller shape
-        for ctr in controllers:
-            if customCtr == "circle":
-                # a custom ctr
-                ctrTemp = pm.circle(r=sizeCtr, nr=(0,1,0), ch=False)[0]
+        self._addShapeCtr(controllers, sizeCtr, customCtr)
 
-            elif customCtr == None:
-                # a nurbs shpere
-                ctrTemp = pm.sphere(r=sizeCtr, ch=False)[0]
-
-            else:
-                # a custom ctr
-                ctrTemp = self._create_controller("%s_base_ctr" % baseName, customCtr, 5)
-
-            ctr.addChild(ctrTemp.getShape(), r=True, s=True)
-
-            pm.delete(ctrTemp)
-
-        # roots and auto grps
         ARC.createRoots(controllers, "root")
         auto = ARC.createRoots(controllers, "auto")
 
+        planes = self._deformPlanes(auto, baseCurveGrps)
+
+        # save data
+        self.controllers[self._baseName]=controllers
+        self.sysObj[self._baseName]=planes
+
+
+    def addCluster(self, clsTrns, parent=None, ctrSize=1.0, ctrlNull=None, symCtr=False, mirrorCls=False):
+        """
+        create a cluster for facial rigs
+        :param clsTrns:
+        :param parent:
+        :param ctrType:
+        :param ctrSize:
+        :param ctrlNull: null where controller will be moved
+        :param symCtr: inverse matrix transform of the controller
+        :param mirrorCls: create a new mirrored cluster
+        :return:
+        """
+        # check type
+        clsTrns = pm.PyNode(clsTrns) if isinstance(clsTrns, str) else clsTrns
+
+        self._baseName = str(clsTrns).split("_")[:-2]
+        self._baseName = "_".join(self._baseName)
+        # replace left right
+        if mirrorCls:
+            if "left" in self._baseName:
+                self._baseName = self._baseName.replace("left", "right")
+            else:
+                self._baseName = self._baseName.replace("right", "left")
+
+        # if no parent, create a empty grp to use
+        if not parent:
+            parent = pm.group(empty=True, name="%s_def_cls_grp" % self._baseName)
+            self._ctrGrp.addChild(parent)
+
+        if mirrorCls:  # fixme delete
+            clsNode = clsTrns.worldMatrix.outputs(type="cluster")[0]
+            clsNode, clsTrns, clsShape = ARC.DeformerOp.mirrorCluster(clsNode)
+            clsTrns.rename(self._baseName+"_def_cls")
+            clsNode.rename(self._baseName+"_def_cls_cls")
+
+        clusterCtr = super(ARAutoRig_Face, self).addCluster(clsTrns, parent, "pole", ctrSize, ctrlNull, symCtr)[0]
+
+        clusterCtr = clusterCtr[0]
+        self._addShapeCtr(clusterCtr, ctrSize, None)
+
+        clsAuto = pm.group(empty=True, name="%s_auto" % str(clsTrns))
+        clsAuto.setTranslation(clsTrns.getPivots(ws=True)[0], "world")
+        parent.addChild(clsAuto)
+        clsAuto.addChild(clsTrns.firstParent())
+
+        # create planes to drive clusters
+        autoGrp = ARC.createRoots(clusterCtr.firstParent(), "auto")
+        planes = self._deformPlanes(autoGrp, [clsAuto])
+
+        # save data
+        self.controllers[self._baseName] = clusterCtr
+        self.sysObj[self._baseName] = planes
+
+
+    def _deformPlanes(self, autoGrp, baseGrp=None):
+        """
+        create a plane and copy the deforms from base mesh, then constraint the autoGrp and baseGrp to the plane
+        :param autoGrp:autoGrp, generally contains a controller as child
+        :param baseGrp: to control a baseShape like wire deformer baseCure
+        :return: planes
+        """
         # create a small plane per point, then combine them
         planes = []
-        for ctr in controllers:
+        for ctr in autoGrp:
             plane = pm.polyPlane(h=0.01, w=0.01, sh=1, sw=1, ch=False)[0]
             plane.setTranslation(ctr.getTranslation("world"), "world")
             planes.append(plane)
 
         # combine planes
-        planes = pm.polyUnite(planes, ch=False, mergeUVSets=True)[0]
-        planes.rename("%s_planes" % baseName)  # rename
-        self._noXformGrp.addChild(planes)  # parent to noXform
-        pm.polyAutoProjection(planes, ch=False, lm=0, pb=0, ibd=1, cm=0, l=2, sc=1, o=1, p=6, ps=0.2, ws=0)
+        if len(planes) > 1:
+            # len 1 gives an error with polyUnite
+            planes = pm.polyUnite(planes, ch=False, mergeUVSets=True)[0]
+        else:
+            planes = planes[0]
+            pm.makeIdentity(planes, a=True, r=True, s=True, t=True)
+            planes.setPivots([0, 0, 0])
 
-        if skinSample:
+
+        planes.rename("%s_planes" % self._baseName)  # rename
+        self._noXformGrp.addChild(planes)  # parent to noXform
+        pm.polyAutoProjection(planes, ch=False, lm=0, pb=0, ibd=1, cm=0, l=2, sc=1, o=1, p=6, ps=0.2, ws=0) # uvs
+
+        if self._MESH_SHAPE:
             # if skin sample, copy skin weights to planes
-            if isinstance(skinSample, str):
-                skinSample = pm.PyNode(skinSample)
-            if isinstance(skinSample, pm.nodetypes.Transform):
-                skinSample = skinSample.getShape()
             # find skin node
-            skinNode = pm.listHistory(skinSample, type='skinCluster')[0]
+            skinNode = pm.listHistory(self._MESH_SHAPE, type='skinCluster')[0]
             # joint list
             jointList = skinNode.influenceObjects()
             # create skinCluster
@@ -118,12 +178,54 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         logger.debug("num Faces: %s" % numFaces)
         for i in range(numFaces):
             # review: don't know why, only works with selection
-            for constr in [auto[i], baseCurveGrps[i]]:
+            # for constr in [autoGrp[i], baseGrp[i]]:
+            #     if not constr:
+            #         continue
+            #     pm.select(planes.f[i], r=True)
+            #     pm.select(constr, add=True)
+            #     pm.pointOnPolyConstraint(maintainOffset=True)
+            #     pm.select(cl=True)
+            #
+            # for j in [autoGrp[i], baseGrp[i]]:
+            pm.select(planes.f[i], r=True)
+            pm.select(autoGrp[i], add=True)
+            pm.pointOnPolyConstraint(maintainOffset=True)
+            pm.select(cl=True)
+            if baseGrp:
                 pm.select(planes.f[i], r=True)
-                pm.select(constr, add=True)
+                pm.select(baseGrp[i], add=True)
                 pm.pointOnPolyConstraint(maintainOffset=True)
                 pm.select(cl=True)
 
-        # save data
-        self.controllers[baseName]=controllers
-        self.sysObj[baseName]=planes
+        return planes
+
+
+    def _addShapeCtr(self, controllers, sizeCtr, customCtr):
+        """
+        Add a shape to the controller
+        :param controllers:
+        :param customCtr (str or None): if None, create a nurbsSphere
+        :return:
+        """
+        #checktype
+        controllers = [controllers] if not isinstance(controllers, list) else controllers
+
+        # controller shape
+        for ctr in controllers:
+            shapes = ctr.listRelatives(s=True)
+            pm.delete(shapes)
+            if customCtr == "circle":
+                # a custom ctr
+                ctrTemp = pm.circle(r=sizeCtr, nr=(0,1,0), ch=False)[0]
+
+            elif customCtr == None:
+                # a nurbs shpere
+                ctrTemp = pm.sphere(r=sizeCtr, ch=False)[0]
+
+            else:
+                # a custom ctr
+                ctrTemp = self._create_controller("%s_base_ctr" % self._baseName, customCtr, 5)
+
+            ctr.addChild(ctrTemp.getShape(), r=True, s=True)
+
+            pm.delete(ctrTemp)
