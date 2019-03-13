@@ -1335,6 +1335,7 @@ def transformDriveNurbObjectCV(nurbObject, follow=False):
         decomposeMatrix = pm.createNode('decomposeMatrix')
         transform.worldMatrix[0].connect(decomposeMatrix.inputMatrix)
         decomposeMatrix.outputTranslate.connect(nurbObject.controlPoints[n])
+
         if isinstance(nurbObject, pm.nodetypes.NurbsCurve) and follow:
             closest = nurbObject.closestPoint(transform.getTranslation("world"), tolerance=0.1, space="world")
             param = nurbObject.getParamAtPoint(closest, "world")
@@ -1346,7 +1347,13 @@ def transformDriveNurbObjectCV(nurbObject, follow=False):
             biNormal = tangent ^ normal
             biNormal.normalize()
 
-            matrix = pm.datatypes.Matrix(tangent, biNormal, -normal, transform.getTranslation("world"))
+            translation = transform.getTranslation("world")
+            matrix = pm.datatypes.Matrix([tangent.x,tangent.y, tangent.z, 0],
+                                         [biNormal.x, biNormal.y, biNormal.z, 0],
+                                         [normal.x, normal.y, normal.z, 0],
+                                         [translation.x, translation.y, translation.z, 1])
+
+            print "param"
 
             transform.setMatrix(matrix)
 
@@ -1944,7 +1951,7 @@ def checkVectorType(vector):
     if isinstance(vector, list) or isinstance(vector, tuple):
         vector = pm.datatypes.Vector(vector[0], vector[1], vector[2])
 
-    return vector
+    return pm.datatypes.Vector(vector[:3])
 
 
 def checkMatrixType(matrix):
@@ -2580,7 +2587,7 @@ class VectorMath():
 
 
     @staticmethod
-    def orientToPlane(matrix, plane=None):
+    def orientMatrixToPlane(matrix, plane=None):
         """
         Conserve the general orient of a matrixTransform, but aligned to a plane.
         option to select the respect axis
@@ -2655,6 +2662,81 @@ class VectorMath():
 
 
     @staticmethod
+    def orientMatrixToVector(matrix, vector, matrixAxis=None):
+        """
+        orient the nearest axis of the matrix to the vector
+        :param matrix:
+        :param vector:
+        :param matrixAxis: align the desired matrix axis. "x", "y", "z"
+        :return:
+        """
+        # check types
+        matrix = checkMatrixType(matrix)
+        vector = checkVectorType(vector)
+        vector.normalize()
+
+        # find nearest axis to vector
+        # compare dot products, and find the nearest vector to plane vector
+        dotValue = 0
+        nrtAId = None
+        MVectr = []
+
+        for i in range(3):
+            MVectr.append(pm.datatypes.Vector(matrix[i][:3]))
+            newDot = MVectr[-1] * vector
+            if abs(dotValue) < abs(newDot):
+                dotValue = newDot
+                nrtAId = i
+
+        if matrixAxis:
+            # override if there is a specific matrix Axis
+            axis = "xyz"
+            nrtAId = axis.index(matrixAxis)
+            dotValue = MVectr[nrtAId] * vector
+
+        newMatrixVec = []
+        for i in range(3):
+            if i == nrtAId:
+                newMatrixVec.append(vector * dotValue / abs(dotValue))
+                continue
+
+            newMatrixVec.append(VectorMath.projectVectorOntoPlane(MVectr[i], vector))
+
+        # cross products to assure ortonormal matrix
+        for i in range(3):
+            newMatrixVec[(i+nrtAId+1)%3] = (newMatrixVec[(i+nrtAId+2)%3] ^ newMatrixVec[(i+nrtAId)%3])
+            newMatrixVec[(i+nrtAId+1)%3].normalize()
+
+        return pm.datatypes.Matrix([newMatrixVec[0].x, newMatrixVec[0].y, newMatrixVec[0].z, 0],
+                                   [newMatrixVec[1].x, newMatrixVec[1].y, newMatrixVec[1].z, 0],
+                                   [newMatrixVec[2].x, newMatrixVec[2].y, newMatrixVec[2].z, 0],
+                                   matrix[3])
+
+
+    @staticmethod
+    def projectVectorOntoPlane(vector, normal):
+        """
+        Calculate the vector projection onto a plane
+        :param vectorOutput(str or pm): attribute with the vector
+        :param vectorNormal(str or om): attribute with the vector
+        :return:
+        """
+        # check types, must be attr type
+        vector = checkVectorType(vector)
+        normal = checkVectorType(normal)
+
+        normal.normalize()
+
+        # proj vector onto normal
+        projVec = VectorMath.projectVector(vector, normal)
+
+        print "Vectors"
+        print type(vector - projVec)
+
+        return pm.datatypes.Vector(vector - projVec)
+
+
+    @staticmethod
     def reflectedMatrix(matrix, flip=False, refMatrix=pm.datatypes.Matrix([-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1])):
         """
         Return a reflected matrix. If flip is false, with no degative scales
@@ -2698,6 +2780,7 @@ class VectorMath():
         return matrix * vector
 
 
+
     @staticmethod
     def reflectedVector(vector, normal):
         """
@@ -2708,6 +2791,8 @@ class VectorMath():
         """
         pass
         # check data type
+
+
 
     @staticmethod
     def projectVector(vector, normal):
@@ -2724,7 +2809,7 @@ class VectorMath():
         normal = checkVectorType(normal)
 
         projection = (vector*normal/(normal.length() ** 2.0)) * normal
-        return projection
+        return pm.datatypes.Vector(projection)
 
 
 #############

@@ -28,11 +28,13 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         super(ARAutoRig_Face, self).__init__(chName, path)
 
 
-    def wires_auto(self, deformer, parent=None, sizeCtr=0.5, customCtr=None, ctrFollow=False):
+    def wires_auto(self, deformer, parent=None, sizeCtr=0.5, customCtr=None, ctrFollow=False, orientType=None):
         """
         This method configure a wire deform for facial rigs.
         The wire must be created and painted previously.
         :param deformer:
+        :param orientPlane(str): zx, xy, etc. align the orient matrix of the controller with the plane,
+        "mesh", orient to mesh nearest normal
         :param :
         :return:
 
@@ -63,7 +65,14 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         baseCurveGrps = ARC.transformDriveNurbObjectCV(curveBaseW, ctrFollow)
         if ctrFollow:
             for i in range(len(controllers)):
-                matrix = ARC.VectorMath.orientToPlane(controllers[i].getMatrix(), "zx")
+                # align matrix
+                matrix = controllers[i].getMatrix()
+                if orientType:
+                    if orientType == "mesh":
+                        normal = self._MESH_SHAPE.getClosestNormal(matrix[3][:3], "world")[0]
+                        matrix = ARC.VectorMath.orientMatrixToVector(matrix, normal, "y")
+                    else:
+                        matrix = ARC.VectorMath.orientMatrixToPlane(matrix, orientType)
                 if matrix[3][0] < 0:
                     matrix[0] = matrix[0] * -1
 

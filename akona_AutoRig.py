@@ -63,8 +63,8 @@ def akonaRigA_Face():
 
     ## wire lips
     lipsDef=["face_lips_Upper", "face_lips_lower"]
-    akonaRig.wires_auto(lipsDef[0] + "_def_wire", None, 0.3, None,True)
-    akonaRig.wires_auto(lipsDef[1] + "_def_wire", None, 0.3, None,True)
+    akonaRig.wires_auto(lipsDef[0] + "_def_wire", None, 0.3, None, True, "zx")
+    akonaRig.wires_auto(lipsDef[1] + "_def_wire", None, 0.3, None, True, "zx")
 
     # TODO: make a method move controller, in the normal direction of the surface, distance equal to the inner controller
     for lip in lipsDef:
@@ -73,7 +73,7 @@ def akonaRigA_Face():
             valShape = val.getShape()
             shapeP = valShape.getCVs()
             for i in range(len(shapeP)):
-                shapeP[i] += (0,0,0.5)
+                shapeP[i] += (0,0,-0.5)
             valShape.setCVs(shapeP)
 
     # look for same position controllers
@@ -85,8 +85,8 @@ def akonaRigA_Face():
 
     ## wire eyeBrow
     browsZone = ["face_left_browIn", "face_right_browIn"]
-    akonaRig.wires_auto(browsZone[0] + "_def_wire",  None, 0.3, None, True)
-    akonaRig.wires_auto(browsZone[1]+"_def_wire", None, 0.3, None, True)
+    akonaRig.wires_auto(browsZone[0] + "_def_wire",  None, 0.3, None, True,"mesh")
+    akonaRig.wires_auto(browsZone[1]+"_def_wire", None, 0.3, None, True,"mesh")
 
     ## general face wire
     faceZone = "face_face"

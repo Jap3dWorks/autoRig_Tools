@@ -818,7 +818,7 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
             # get transformMatrix and orient new controller
             matrix = pm.xform(footFkCtr, ws=True, q=True, m=True)
 
-            matrix = ARC.VectorMath.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
+            matrix = ARC.VectorMath.orientMatrixToPlane(matrix, planeAlign)  # adjusting orient to plane zx
             pm.xform(footFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             # fk control Shape
@@ -1162,7 +1162,7 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
             # get transformMatrix and orient new controller TODO: function
             matrix = pm.xform(handFkCtr, ws=True, q=True, m=True)
 
-            matrix = ARC.VectorMath.orientToPlane(matrix, planeAlign)  # adjusting orient to plane zx
+            matrix = ARC.VectorMath.orientMatrixToPlane(matrix, planeAlign)  # adjusting orient to plane zx
             pm.xform(handFkCtr, ws=True, m=matrix)  # new transform matrix with vector adjust
 
             if not handFkControllerList:
