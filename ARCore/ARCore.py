@@ -2589,6 +2589,7 @@ class VectorMath():
     @staticmethod
     def orientMatrixToPlane(matrix, plane=None):
         """
+        Deprecated, use orientMatrixToVector
         Conserve the general orient of a matrixTransform, but aligned to a plane.
         option to select the respect axis
         Args:
