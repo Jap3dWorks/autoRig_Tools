@@ -13,6 +13,64 @@ logger = logging.getLogger('ARCore:')
 logger.setLevel(logging.DEBUG)
 
 
+def nearestGeometries(keys, geometries, distance=0.5):
+    """
+    return all the geometries inside the distance range
+    :param keys: reference geometries
+    :param geometries: geametries to check
+    :return: geometries inside the range distance
+    """
+    nearestGeos = set()  # save here the nearest geometries
+
+    # check geometries
+    for i in range(len(geometries)):
+        geometries[i] = pm.PyNode(geometries[i]) if isinstance(geometries[i], str) else geometries[i]
+        geometries[i] = geometries[i].getShape() if isinstance(geometries[i], pm.nodetypes.Transform) else geometries[i]
+
+    for geo in geometries:
+        # check each geometry
+        geoSelList = OpenMaya.MSelectionList()
+        geoSelList.add(str(geo))
+        geoDag = OpenMaya.MDagPath()
+        geoSelList.getDagPath(0, geoDag)
+        MFnGeoM = OpenMaya.MFnMesh(geoDag)
+
+        found = False
+        # check all vertices for element
+        for key in keys:
+            key = pm.PyNode(key) if isinstance(key, str) else key
+            key = key.getShape() if isinstance(key, pm.nodetypes.Transform) else key
+
+            # create a iterator
+            mselection = OpenMaya.MSelectionList()
+            mselection.add(str(key))
+            mdagPath = OpenMaya.MDagPath()
+            mselection.getDagPath(0, mdagPath)
+            meshIt = OpenMaya.MItMeshVertex(mdagPath)
+
+            #iterate over the vertices
+            while not meshIt.isDone():
+                vPos = meshIt.position(OpenMaya.MSpace.kWorld)
+                # check nearestPoint
+                mPoint = OpenMaya.MPoint()
+                MFnGeoM.getClosestPoint(vPos, mPoint, OpenMaya.MSpace.kWorld)  # maybe here get error
+                vecDistance = OpenMaya.MVector(vPos - mPoint)
+
+                if vecDistance.length() <= distance:
+                    logger.debug("point Found at: %s" % vecDistance.length())
+                    nearestGeos.add(geo)
+                    found = True
+                    break
+
+                meshIt.next()
+
+            if found:
+                found = False
+                break
+
+    return nearestGeos
+
+
 def getCurrentPath():
     """
     Get the ARCore.py path
@@ -37,6 +95,14 @@ def toMelCode(code):
     codesplit = code.split('\n')
     melCode = 'python("' + '\\n"+\n"'.join(codesplit) + '");'
     return melCode
+
+
+def sortByPosition(key):
+    """
+    sort the list be translate x
+    :return:
+    """
+    return key.getTranslation("world")[0]
 
 
 def createRoots(listObjects, suffix='root'):

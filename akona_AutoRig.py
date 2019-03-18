@@ -6,6 +6,7 @@ import re
 import ARAutoRig
 import ARCore
 
+
 def import_model(path='D:/_docs/_Animum/Akona/skinCluster/akona_skinPSD_d_facial.ma'):
     cmds.file(new=True, force=True)
     cmds.file(path, i=True, force=True)
@@ -15,6 +16,7 @@ def import_model(path='D:/_docs/_Animum/Akona/skinCluster/akona_skinPSD_d_facial
 FACIAL_SHAPE = "facialRig_meshShape"
 NAME = "akona"
 PATH = "D:/_docs/_Animum/Akona"
+ARC = ARCore.ARCore
 
 def akonaRigA_Body():
     # spine Head
@@ -64,7 +66,10 @@ def akonaRigA_Face():
     ## wire lips
     lipsDef=["face_lips_Upper", "face_lips_lower"]
     akonaRig.wires_auto(lipsDef[0] + "_def_wire", None, 0.3, None, True, "zx")
+    akonaRig.auto_SDK(log=True)
     akonaRig.wires_auto(lipsDef[1] + "_def_wire", None, 0.3, None, True, "zx")
+    akonaRig.auto_SDK(log=True)
+
 
     # TODO: make a method move controller, in the normal direction of the surface, distance equal to the inner controller
     for lip in lipsDef:
@@ -73,27 +78,31 @@ def akonaRigA_Face():
             valShape = val.getShape()
             shapeP = valShape.getCVs()
             for i in range(len(shapeP)):
-                shapeP[i] += (0,0,-0.5)
+                shapeP[i] += (0,0,-0.7)
             valShape.setCVs(shapeP)
 
     # look for same position controllers
     for i in [0, -1]:
-        parents=akonaRig.controllers[lipsDef[1]][i].getAllParents()[:2]
-        akonaRig.controllers[lipsDef[0]][i].addChild(akonaRig.controllers[lipsDef[1]][i])
+        # if this give issues, use parent constraint
+        ARC.DGUtils.connectAttributes(akonaRig.controllers[lipsDef[0]][i], akonaRig.controllers[lipsDef[1]][i],
+                                      ["translate", "rotate", "scale"], "XYZ")
         akonaRig.controllers[lipsDef[1]][i].visibility.set(0)
-        pm.delete(parents)
 
     ## wire eyeBrow
     browsZone = ["face_left_browIn", "face_right_browIn"]
     akonaRig.wires_auto(browsZone[0] + "_def_wire",  None, 0.3, None, True,"mesh")
+    akonaRig.auto_SDK("x", False)
     akonaRig.wires_auto(browsZone[1]+"_def_wire", None, 0.3, None, True,"mesh")
+    akonaRig.auto_SDK("x", False)
 
     ## general face wire
     faceZone = "face_face"
     akonaRig.wires_auto(faceZone+"_def_wire", None, 15, "circle")
     # hide first and last
-    pm.delete(akonaRig.controllers[faceZone][0].getShape())
     pm.delete(akonaRig.controllers[faceZone][-1].getShape())
+    # add a new shape
+    faceFirstCtr = akonaRig.controllers[faceZone][0]
+    akonaRig.addShapeCtr(faceFirstCtr, 1, "faceWire_00", 17)
 
     ## project deformers, to drive brows and lips from face wire
     for i in [lipsDef[0], lipsDef[1], browsZone[0], browsZone[1]]:

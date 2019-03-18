@@ -1,22 +1,28 @@
 import pymel.core as pm
 from maya import OpenMaya
 import re
+import math
+from maya import mel
 
 from _autoRig_Abstract import _ARAutoRig_Abstract
 from ..ARCore import ARCore as ARC
 
 import logging
+
 logging.basicConfig()
 logger = logging.getLogger('ARAutoRig_Face:')
 logger.setLevel(logging.DEBUG)
+
 
 class ARAutoRig_Face(_ARAutoRig_Abstract):
     """
     Class to construct facial rig
     """
+
     def __init__(self, chName, path, meshShape):
         self.controllers = {}  # dict with controllers created
         self.sysObj = {}  # dict with interest sys obj, sometimes it 's helpful to add extra functions
+        self.autoSDK_grps = {}  # grps autos SDK
 
         meshShape = pm.PyNode(meshShape) if isinstance(meshShape, str) else meshShape
         meshShape = meshShape.getShape if isinstance(meshShape, pm.nodetypes.Transform) else meshShape
@@ -84,16 +90,109 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         pm.parent(controllers, parent)
         pm.parent(baseCurveGrps, self._noXformGrp)
 
-        self._addShapeCtr(controllers, sizeCtr, customCtr)
+        self.addShapeCtr(controllers, sizeCtr, customCtr)
 
         ARC.createRoots(controllers, "root")
         auto = ARC.createRoots(controllers, "auto")
+        autoSDK = ARC.createRoots(controllers, "autoSDK")
 
         planes = self._deformPlanes(auto, baseCurveGrps)
 
         # save data
-        self.controllers[self._baseName]=controllers
-        self.sysObj[self._baseName]=planes
+        self.controllers[self._baseName] = controllers
+        self.sysObj[self._baseName] = planes
+        self.autoSDK_grps[self._baseName] = autoSDK
+        self.last_autoSDK = autoSDK
+
+
+    def auto_SDK(self, symAxis="x", midCtr = True, log=False):
+        """
+        create auto sdk
+        :return:
+        """
+        VMN = ARC.VectorMath_Nodes
+        axisList = "XYZ"
+
+        # get two possible sides
+        positive=list(self.last_autoSDK)
+        positive.sort(key=ARC.sortByPosition)
+        negative=list(self.last_autoSDK)
+        negative.sort(key=ARC.sortByPosition, reverse=True)
+
+        listLen = len(positive)
+
+        logger.debug("Positive list: %s" % positive)
+        logger.debug("Negative list: %s" % negative)
+
+        if midCtr:
+            listOptions = [positive, negative, positive[:listLen/2+1], negative[:listLen/2+1]]
+        else:
+            listOptions = [positive, negative]
+
+
+        for op, side in enumerate(listOptions):
+            if not side:
+                continue
+            driver = [d for d in side[-1].getChildren() if isinstance(d, pm.nodetypes.Transform)][0]
+            lenSide = float(len(side))
+
+            influence = lambda x: x / lenSide  # influence formula
+
+            if log:
+                # influence = lambda x: math.log( len(side), x) if x != 0 else 0
+                if op <2:
+                    # influence = lambda x: (x / lenSide) ** 2.0
+                    # influence = lambda x: math.sqrt(x / lenSide)
+                    influence = lambda x: x / lenSide  # influence formula
+
+                else:
+                    print "op %s" % op
+                    influence = lambda x: (x / lenSide) ** (1/2.5)
+
+            driverMatrix = pm.xform(driver, q=True, ws=True, m=True)
+            for i, obj in enumerate(side[:-1]):
+                autoMatrix = pm.xform(obj, q=True, ws=True, m=True)
+
+                # create anim nodes for each attribute
+                for attr in ["translate"]:
+                    for j, axis in enumerate(axisList):
+                        # additive for functions
+                        logger.debug("Current axis SDK: %s, %s" % (axis, j))
+                        # each attribute has its animCurve type
+                        animNode = pm.createNode("animCurveTL") if attr == "translate" else pm.createNode("animCurveTA")  # create anim node
+                        driver.attr("%s%s" % (attr, axis)).connect(animNode.input)
+                        plugs = obj.attr("%s%s" % (attr, axis)).inputs(p=True)
+
+                        if plugs:
+                            logger.debug("Found plugs: %s" % plugs)
+                            plugs[0].disconnect(obj.attr("%s%s" % (attr, axis)))
+                            plusNode = VMN.plusMinusAverage(1, plugs[0], animNode.output)
+                            plusNode.connect(obj.attr("%s%s" % (attr, axis)))
+                        else:
+                            animNode.output.connect(obj.attr("%s%s" % (attr, axis)))
+
+                        # todo: ARC function for driven keys
+                        drvVector = pm.datatypes.Vector(driverMatrix[j])
+                        autoVector = pm.datatypes.Vector(autoMatrix[j])
+                        dot = drvVector * autoVector
+                        logger.debug("dot: %s" %(dot))
+                        dot = dot if dot != 0 else 1
+                        sign = dot/abs(dot)
+                        logger.debug("sign:%s" %(sign))
+                        print influence(i)
+                        print i
+                        print i/len(side)
+                        print len(side)
+
+                        animNode.addKeyframe(0, 0.0)
+                        animNode.addKeyframe(1, influence(i)*sign)
+                        animNode.addKeyframe(-1, -(influence(i)*sign))
+
+                        animNode.setTangentTypes([0, 1, 2], inTangentType='linear', outTangentType='linear')
+                        animNode.setTangentTypes([0, 2], inTangentType='clamped', outTangentType='clamped')
+
+                        animNode.setPostInfinityType('linear')
+                        animNode.setPreInfinityType('linear')
 
 
     def addCluster(self, clsTrns, parent=None, ctrSize=1.0, ctrlNull=None, symCtr=False, mirrorCls=False):
@@ -128,13 +227,13 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         if mirrorCls:  # fixme delete
             clsNode = clsTrns.worldMatrix.outputs(type="cluster")[0]
             clsNode, clsTrns, clsShape = ARC.DeformerOp.mirrorCluster(clsNode)
-            clsTrns.rename(self._baseName+"_def_cls")
-            clsNode.rename(self._baseName+"_def_cls_cls")
+            clsTrns.rename(self._baseName + "_def_cls")
+            clsNode.rename(self._baseName + "_def_cls_cls")
 
         clusterCtr = super(ARAutoRig_Face, self).addCluster(clsTrns, parent, "pole", ctrSize, ctrlNull, symCtr)[0]
 
         clusterCtr = clusterCtr[0]
-        self._addShapeCtr(clusterCtr, ctrSize, None)
+        self.addShapeCtr(clusterCtr, ctrSize, None)
 
         clsAuto = pm.group(empty=True, name="%s_auto" % str(clsTrns))
         clsAuto.setTranslation(clsTrns.getPivots(ws=True)[0], "world")
@@ -173,10 +272,8 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
             pm.makeIdentity(planes, a=True, r=True, s=True, t=True)
             planes.setPivots([0, 0, 0])
 
-
         planes.rename("%s_planes" % self._baseName)  # rename
-        self._noXformGrp.addChild(planes)  # parent to noXform
-        pm.polyAutoProjection(planes, ch=False, lm=0, pb=0, ibd=1, cm=0, l=2, sc=1, o=1, p=6, ps=0.2, ws=0) # uvs
+        pm.polyAutoProjection(planes, ch=False, lm=0, pb=0, ibd=1, cm=0, l=2, sc=1, o=1, p=6, ps=0.2, ws=0)  # uvs
 
         if self._MESH_SHAPE:
             # if skin sample, copy skin weights to planes
@@ -190,20 +287,11 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
             pm.copySkinWeights(ss=skinNode, ds=copySkinCluster, noMirror=True, surfaceAssociation='closestPoint',
                                influenceAssociation=('closestJoint', 'closestJoint'))
 
+
         # connect each auto grp to each poly face
         numFaces = planes.getShape().numFaces()
         logger.debug("num Faces: %s" % numFaces)
         for i in range(numFaces):
-            # review: don't know why, only works with selection
-            # for constr in [autoGrp[i], baseGrp[i]]:
-            #     if not constr:
-            #         continue
-            #     pm.select(planes.f[i], r=True)
-            #     pm.select(constr, add=True)
-            #     pm.pointOnPolyConstraint(maintainOffset=True)
-            #     pm.select(cl=True)
-            #
-            # for j in [autoGrp[i], baseGrp[i]]:
             pm.select(planes.f[i], r=True)
             pm.select(autoGrp[i], add=True)
             pm.pointOnPolyConstraint(maintainOffset=True)
@@ -214,35 +302,19 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
                 pm.pointOnPolyConstraint(maintainOffset=True)
                 pm.select(cl=True)
 
+            #hammer weights
+            try:
+                #TODO: bad aproximation
+                vertex = pm.modeling.polyListComponentConversion(planes.f[i], tv=True)
+                pm.select(vertex, r=True)
+                logger.debug("vertices %s:" % vertex)
+                mel.eval("weightHammerVerts;")
+                pm.select(cl=True)
+            except:
+                pm.select(cl=True)
+
+
+
+        # parent planes to nonXform grp
+        self._noXformGrp.addChild(planes)  # parent to noXform
         return planes
-
-
-    def _addShapeCtr(self, controllers, sizeCtr, customCtr):
-        """
-        Add a shape to the controller
-        :param controllers:
-        :param customCtr (str or None): if None, create a nurbsSphere
-        :return:
-        """
-        #checktype
-        controllers = [controllers] if not isinstance(controllers, list) else controllers
-
-        # controller shape
-        for ctr in controllers:
-            shapes = ctr.listRelatives(s=True)
-            pm.delete(shapes)
-            if customCtr == "circle":
-                # a custom ctr
-                ctrTemp = pm.circle(r=sizeCtr, nr=(0,1,0), ch=False)[0]
-
-            elif customCtr == None:
-                # a nurbs shpere
-                ctrTemp = pm.sphere(r=sizeCtr, ch=False)[0]
-
-            else:
-                # a custom ctr
-                ctrTemp = self._create_controller("%s_base_ctr" % self._baseName, customCtr, 5)
-
-            ctr.addChild(ctrTemp.getShape(), r=True, s=True)
-
-            pm.delete(ctrTemp)

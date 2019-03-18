@@ -261,3 +261,67 @@ class _ARAutoRig_Abstract(object):
         """
         controller = ARC.createController(name, controllerType, self._chName, self._path, s, colorIndex)
         return controller
+
+
+    def addShapeCtr(self, controllers, sizeCtr, customCtr, color=17):
+        """
+        Add a shape to the controller
+        :param controllers: controller name (generally a transform node)
+        :param customCtr (str or None): if None, create a nurbsSphere
+        :param sizeCtr (int or float): size of the controller
+        :param customCtr (string): if None-> create a nurbs sphere; if circle-> create a circle curve
+        :return:
+        """
+        # checktype
+        controllers = [controllers] if not isinstance(controllers, list) else controllers
+
+        # controller shape
+        for ctr in controllers:
+            shapes = ctr.listRelatives(s=True)
+            pm.delete(shapes)
+            if customCtr == "circle":
+                # a custom ctr
+                ctrTemp = pm.circle(r=sizeCtr, nr=(0, 1, 0), ch=False)[0]
+                shape = ctrTemp.getShape()
+                # set color
+                shape.overrideEnabled.set(True)
+                shape.overrideColor.set(color)
+
+            elif customCtr == None:
+                # a nurbs shpere
+                ctrTemp = pm.sphere(r=sizeCtr, ch=False)[0]
+                # assign material
+                colors = [(0.23600000143051147, 0.8149999976158142, 0.04100000113248825),
+                          (0.04100000113248825, 0.39100000262260437, 0.8149999976158142),
+                          (0.8149999976158142, 0.6970000267028809, 0.04100000113248825)]
+
+                for c, colorAttr in enumerate(["_leftCtrSh", "_rightCtrSh", "_midCtrSh"]):
+                    if not hasattr(self, colorAttr):
+                        ctrMat=pm.shadingNode("lambert", asShader=True, name=colorAttr)
+                        ctrMat.color.set(colors[c])
+                        newAttr = pm.sets(name='%sSG' % str(ctrMat), empty=True, renderable=True, noSurfaceShader=True)
+                        logger.debug("Setting new attr")
+                        setattr(self, colorAttr, newAttr)
+                        logger.debug("setted new attr")
+                        ctrMat.outColor.connect(newAttr.surfaceShader)
+
+                if ctr.getTranslation("world")[0] < -0.01:
+                    # self._rightCtrSh.addMember(ctrTemp.getShape())
+                    pm.sets(self._rightCtrSh, e=True, forceElement=ctrTemp.getShape())
+
+                elif ctr.getTranslation("world")[0] > 0.01:
+                    pm.sets(self._leftCtrSh, e=True, forceElement=ctrTemp.getShape())
+
+                else:
+                    pm.sets(self._midCtrSh, e=True, forceElement=ctrTemp.getShape())
+                # middle ctr
+
+            else:
+                # a custom ctr
+                ctrTemp = ARC.createController("%s_shp" % str(ctr), customCtr, self._chName, self._path, sizeCtr, color)
+
+            # add the shape to the controller
+            ctr.addChild(ctrTemp.getShape(), r=True, s=True)
+
+            # delete old controller
+            pm.delete(ctrTemp)
