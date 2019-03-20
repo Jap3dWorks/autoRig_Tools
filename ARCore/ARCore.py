@@ -13,6 +13,50 @@ logger = logging.getLogger('ARCore:')
 logger.setLevel(logging.DEBUG)
 
 
+def cloneWithHierarchy(root, type="transform", suffix="_dup"):
+    """
+    Clone the given joint root, clone the hierarchy with transform nodes
+    :param root(str or pm):
+    :param type(str): type of output objects
+    :return:
+    """
+    # check type
+    root = pm.PyNode(root) if isinstance(root, str) else root
+    allChildren = [i for i in root.listRelatives(ad=True) if isinstance(i, pm.nodetypes.Transform) or isinstance(i, pm.nodetypes.Joint)]
+
+    suffix = "_"+suffix
+
+    if type == "transform":
+        dupFunc = lambda x: pm.group(empty=True, w=True, name=str(x) + suffix)
+    elif type == "locator":
+        dupFunc = lambda x: pm.spaceLocator(name=str(x) + suffix)
+    elif type == "joint":
+        dupFunc = lambda x: pm.createNode("joint", name=str(x) + suffix)
+
+    allDuplicated = []
+    for child in allChildren:
+        dup = dupFunc(child)
+        pm.xform(dup, ws=True, m=pm.xform(child, q=True, ws=True, m=True))
+        allDuplicated.append(dup)
+
+    for i, child in enumerate(allChildren):
+        pChild = child.firstParent()
+        logger.debug("Parent %s" %str(pChild))
+        logger.debug("Obj:  %s" %str(child))
+        if pChild in allChildren:
+            logger.debug("%s in allChildren" % (pChild))
+            pChildId = allChildren.index(pChild)
+            logger.debug("Parent id: %s" % pChildId)
+            allDuplicated[pChildId].addChild(allDuplicated[i])
+            if type == "joint":
+                pm.makeIdentity(allDuplicated[i],apply=True, r=True, t=False, s=False)
+                jointP = allDuplicated[i].firstParent()
+                if not jointP in allDuplicated:
+                    pm.ungroup(jointP)
+
+    return allDuplicated
+
+
 def nearestGeometries(keys, geometries, distance=0.5):
     """
     return all the geometries inside the distance range
@@ -27,6 +71,11 @@ def nearestGeometries(keys, geometries, distance=0.5):
         geometries[i] = pm.PyNode(geometries[i]) if isinstance(geometries[i], str) else geometries[i]
         geometries[i] = geometries[i].getShape() if isinstance(geometries[i], pm.nodetypes.Transform) else geometries[i]
 
+    # time range
+    startTime = int(pm.playbackOptions(minTime=True, q=True))
+    endTime = int(pm.playbackOptions(maxTime=True, q=True))
+
+
     for geo in geometries:
         # check each geometry
         geoSelList = OpenMaya.MSelectionList()
@@ -37,32 +86,39 @@ def nearestGeometries(keys, geometries, distance=0.5):
 
         found = False
         # check all vertices for element
-        for key in keys:
-            key = pm.PyNode(key) if isinstance(key, str) else key
-            key = key.getShape() if isinstance(key, pm.nodetypes.Transform) else key
+        # time frame
+        for stime in range(startTime, endTime, 24):
+            pm.currentTime(stime)
 
-            # create a iterator
-            mselection = OpenMaya.MSelectionList()
-            mselection.add(str(key))
-            mdagPath = OpenMaya.MDagPath()
-            mselection.getDagPath(0, mdagPath)
-            meshIt = OpenMaya.MItMeshVertex(mdagPath)
+            for key in keys:
+                key = pm.PyNode(key) if isinstance(key, str) else key
+                key = key.getShape() if isinstance(key, pm.nodetypes.Transform) else key
 
-            #iterate over the vertices
-            while not meshIt.isDone():
-                vPos = meshIt.position(OpenMaya.MSpace.kWorld)
-                # check nearestPoint
-                mPoint = OpenMaya.MPoint()
-                MFnGeoM.getClosestPoint(vPos, mPoint, OpenMaya.MSpace.kWorld)  # maybe here get error
-                vecDistance = OpenMaya.MVector(vPos - mPoint)
+                # create a iterator
+                mselection = OpenMaya.MSelectionList()
+                mselection.add(str(key))
+                mdagPath = OpenMaya.MDagPath()
+                mselection.getDagPath(0, mdagPath)
+                meshIt = OpenMaya.MItMeshVertex(mdagPath)
 
-                if vecDistance.length() <= distance:
-                    logger.debug("point Found at: %s" % vecDistance.length())
-                    nearestGeos.add(geo)
-                    found = True
+                #iterate over the vertices
+                while not meshIt.isDone():
+                    vPos = meshIt.position(OpenMaya.MSpace.kWorld)
+                    # check nearestPoint
+                    mPoint = OpenMaya.MPoint()
+                    MFnGeoM.getClosestPoint(vPos, mPoint, OpenMaya.MSpace.kWorld)  # maybe here get error
+                    vecDistance = OpenMaya.MVector(vPos - mPoint)
+
+                    if vecDistance.length() <= distance:
+                        logger.debug("point Found at: %s" % vecDistance.length())
+                        nearestGeos.add(geo)
+                        found = True
+                        break
+
+                    meshIt.next()
+
+                if found:
                     break
-
-                meshIt.next()
 
             if found:
                 found = False
