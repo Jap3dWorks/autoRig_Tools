@@ -24,6 +24,8 @@ def cloneWithHierarchy(root, type="transform", suffix="_dup"):
     root = pm.PyNode(root) if isinstance(root, str) else root
     allChildren = [i for i in root.listRelatives(ad=True) if isinstance(i, pm.nodetypes.Transform) or isinstance(i, pm.nodetypes.Joint)]
 
+    allChildren.append(root)  # copy root too
+
     suffix = "_"+suffix
 
     if type == "transform":
@@ -54,7 +56,7 @@ def cloneWithHierarchy(root, type="transform", suffix="_dup"):
                 if not jointP in allDuplicated:
                     pm.ungroup(jointP)
 
-    return allDuplicated
+    return allDuplicated, allChildren
 
 
 def nearestGeometries(keys, geometries, distance=0.5):
@@ -681,6 +683,7 @@ class APIHelp:
 class DeformerOp:
 
     class WeightsOP:
+        # TODO: work with BS targets
         def __init__(self):
             # weights buffer
             self._weights = None
@@ -788,7 +791,7 @@ class DeformerOp:
             :param BSNode:
             :return:
             """
-            arraySize, weightAttr = self._setGetCommon(BSNode)
+            arraySize, weightAttr = self._setGetCommon_BS(BSNode)
 
             # set the array with the total of points, mFloatArray is faster
             self._weights = OpenMaya.MFloatArray(arraySize, 0.0)

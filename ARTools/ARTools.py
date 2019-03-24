@@ -146,6 +146,15 @@ class PSDUtils(object):
         negative(pm.mesh): posed mesh
         base(pm.Mesh): non posed and non sculpted mesh
         """
+        # check types
+        positive = pm.PyNode(positive) if isinstance(positive, str) else positive
+        positive = positive.getShape() if isinstance(positive, pm.nodetypes.Transform) else positive
+        negative = pm.PyNode(negative) if isinstance(negative, str) else negative
+        negative = negative.getShape() if isinstance(negative, pm.nodetypes.Transform) else negative
+        base = pm.PyNode(base) if isinstance(base, str) else base
+        base = base.getShape() if isinstance(base, pm.nodetypes.Transform) else base
+
+
         diferenceIndex = []
         for i, point in enumerate(positive.getPoints('object')):
             if point != negative.getPoint(i, 'object'):

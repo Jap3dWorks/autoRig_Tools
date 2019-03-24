@@ -130,6 +130,10 @@ def akonaRigA_Face():
         ARCore.ARCore.DeformerOp.addToDeformer(faceZone+"_def_wire", akonaRig.sysObj[clster], FACIAL_SHAPE)
 
 
+    # joints controllers
+    akonaRig.cloneJointsCtr("face_head_skin_joint")
+
+
 def hideElements():
     """
     Hide annoying things like curves, ik handles, joints, etc

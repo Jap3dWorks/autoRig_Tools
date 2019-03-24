@@ -195,6 +195,7 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
                         animNode.setPreInfinityType('linear')
 
 
+
     def addCluster(self, clsTrns, parent=None, ctrSize=1.0, ctrlNull=None, symCtr=False, mirrorCls=False):
         """
         create a cluster for facial rigs
@@ -249,9 +250,45 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
         self.sysObj[self._baseName] = planes
 
 
+    def cloneJointsCtr(self, root):
+        """
+        Clone Joints, and set as controllers
+        :param root: root joint
+        :return:
+        """
+        controllers, joints = ARC.cloneWithHierarchy(root, "joint", "ctr")
+        logger.debug(controllers)
+        valControllers = []
+        valJoints = []
+        # get only valid joints
+        for i in range(len(joints)):
+            if "End" in str(joints[i]) or "Tip" in str(joints[i]):
+                pm.delete(controllers[i])
+
+            elif isinstance(joints[i], pm.nodetypes.Joint):
+                valControllers.append(controllers[i])
+                valJoints.append(joints[i])
+
+        logger.debug("%s, %s" %(len(valControllers), len(valJoints)))
+
+        # root and autos
+        controllersRoot = ARC.createRoots(valControllers, "root")
+        controllersAuto = ARC.createRoots(valControllers, "auto")
+
+        # parent constraint and type of visualization
+        for i in range(len(valJoints)):
+            valControllers[i].drawStyle.set(2)
+            valControllers[i].displayHandle.set(True)
+
+            pm.parentConstraint(valControllers[i], valJoints[i], maintainOffset=True)
+
+
+        self.controllers["jointControllers"] = valControllers
+
+
     def _deformPlanes(self, autoGrp, baseGrp=None):
         """
-        create a plane and copy the deforms from base mesh, then constraint the autoGrp and baseGrp to the plane
+        Create a plane and copy the deforms from base mesh, then constraint the autoGrp and baseGrp to the plane
         :param autoGrp:autoGrp, generally contains a controller as child
         :param baseGrp: to control a baseShape like wire deformer baseCure
         :return: planes
