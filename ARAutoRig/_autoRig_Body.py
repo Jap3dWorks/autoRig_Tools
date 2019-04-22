@@ -44,18 +44,28 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
             self._ctrGrp.addChild(self.mainCtr)
 
         # connect main scale to grp joints
-        ARC.DGUtils.connectAttributes(self.mainCtr, pm.PyNode('joints_grp'), ['scale'], ['X', 'Y', 'Z'])
-
+        ARC.DGUtils.connectAttributes(self.mainCtr,
+                                      pm.PyNode('joints_grp'),
+                                      ['scale'],
+                                      ['X', 'Y', 'Z'])
 
     # TODO: zone var in names
     def spine_auto(self, zone='spine', *funcs):
         """
         Auto create a character spine
+        :param zone(str): Name of the zone
+        :param funcs(func): Extra modular functions
         """
         baseName = zone
+
         # detect spine joints and their positions
-        spineJoints = [point for point in pm.ls() if re.match('^%s.*%s$' % (zone, self._skinJointNaming), str(point))]
-        positions = [point.getTranslation(space='world') for point in spineJoints]
+        spineJoints = [point for point in pm.ls() if
+                       re.match('^%s.*%s$' % (zone, self._skinJointNaming),
+                                str(point))]
+
+        positions = [point.getTranslation(space='world') for point in
+                     spineJoints]
+
         logger.debug('Spine joints: %s' % spineJoints)
 
         spineCurveTransform = pm.curve(ep=positions, name='%s_1_crv' % baseName)
@@ -69,7 +79,8 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
         spineCurve = spineCurveTransform.getShape()
 
         #rebuildCurve
-        pm.rebuildCurve(spineCurve, s=2, rpo=True, ch=False, rt=0, d=3, kt=0, kr=0)
+        pm.rebuildCurve(spineCurve, s=2, rpo=True, ch=False,
+                        rt=0, d=3, kt=0, kr=0)
 
         # review: test autoMethod
         ARC.snapCurveToPoints(spineJoints, spineCurve, 16, 0.01)
@@ -80,17 +91,27 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
         self._spineIKControllerList = []
         spineFKControllerList = []
         for n, point in enumerate(spineCurve.getCVs()):
-            ctrType = 'hips' if n == 0 else 'chest' if n == spineCurve.numCVs() - 1 else 'spine%s' % n
+            ctrType = 'hips' if n == 0 else 'chest' \
+                if n == spineCurve.numCVs() - 1 else 'spine%s' % n
+
             # create grp to manipulate the curve
-            spineDriver = pm.group(name='%s_%s_Curve_drv' % (baseName, ctrType), empty=True)
+            spineDriver = pm.group(name='%s_%s_Curve_drv' % (baseName, ctrType),
+                                   empty=True)
+
             spineDriver.setTranslation(point)
-            decomposeMatrix = pm.createNode('decomposeMatrix', name='%s_%s_decomposeMatrix' % (baseName, ctrType))
+
+            decomposeMatrix = pm.createNode('decomposeMatrix',
+                                            name='%s_%s_decomposeMatrix' % (
+                                            baseName,
+                                            ctrType))
+
             spineDriver.worldMatrix[0].connect(decomposeMatrix.inputMatrix)
             decomposeMatrix.outputTranslate.connect(spineCurve.controlPoints[n])
             spineDrvList.append(spineDriver)
 
             # create controller and parent locator
-            spineController = self._create_controller('%s_%s_1_ik_ctr' % (baseName, ctrType), '%sIk' % ctrType, 1, 17)
+            spineController = self._create_controller(
+                '%s_%s_1_ik_ctr' % (baseName, ctrType), '%sIk' % ctrType, 1, 17)
             logger.debug('spine controller: %s' % spineController)
 
             spineController.setTranslation(point)
@@ -102,19 +123,25 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
             if n < 3:
                 # first fk controller bigger
                 fkCtrSize = 1.5 if len(spineFKControllerList) == 0 else 1
-                spineFKController = self._create_controller('%s_%s_fk_ctr' % (baseName, n + 1), 'hipsFk', fkCtrSize, 4)
+
+                spineFKController = self._create_controller(
+                    '%s_%s_fk_ctr' % (baseName, n + 1), 'hipsFk', fkCtrSize, 4)
+
                 spineFKController.setTranslation(point)
                 spineFKControllerList.append(spineFKController)
 
                 # Fk hierarchy
                 if len(spineFKControllerList) > 1:
-                    spineFKControllerList[n-1].addChild(spineFKController)
-                    logger.debug('parent %s, child %s' % (spineFKControllerList[-1], spineFKController))
+                    spineFKControllerList[n - 1].addChild(spineFKController)
+
+                    logger.debug('parent %s, child %s' % (
+                    spineFKControllerList[-1], spineFKController))
 
             # configure ctr hierarchy, valid for 5 ctrllers
             if n == 1:
                 self._spineIKControllerList[0].addChild(spineController)
                 spineFKControllerList[0].addChild(self._spineIKControllerList[0])
+
             # last iteration
             elif n == (spineCurve.numCVs()-1):
                 spineController.addChild(self._spineIKControllerList[-2])
@@ -147,14 +174,24 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
             util = OpenMaya.MScriptUtil()
             util.createFromDouble(0.0)
             ptr = util.asDoublePtr()
-            mfnNurbCurve.getParamAtPoint(OpenMaya.MPoint(jointPos[0], jointPos[1], jointPos[2]), ptr, 1.0)
+            mfnNurbCurve.getParamAtPoint(
+                OpenMaya.MPoint(jointPos[0],
+                                jointPos[1],
+                                jointPos[2]),
+                ptr,
+                1.0)
+
             param = util.getDouble(ptr)
 
             # create empty grp and connect nodes
             jointNameSplit = str(joint).split('_')[1]
-            jointDriverGrp = pm.group(empty=True, name='%s_%s_drv%s_drv' % (baseName, jointNameSplit, n+1))
+            jointDriverGrp = pm.group(empty=True, name='%s_%s_drv%s_drv' % (
+            baseName, jointNameSplit, n + 1))
             # jointDriverGrp = pm.spaceLocator(name='%s_target' % str(joint))
-            pointOnCurveInfo = pm.createNode('pointOnCurveInfo', name='%s_%s_drv%s_positionOnCurveInfo' % (baseName, jointNameSplit, n+1))
+            pointOnCurveInfo = pm.createNode('pointOnCurveInfo',
+                                             name='%s_%s_drv%s_positionOnCurveInfo' % (
+                                             baseName, jointNameSplit, n + 1))
+
             spineCurve.worldSpace[0].connect(pointOnCurveInfo.inputCurve)
             pointOnCurveInfo.parameter.set(param)
             pointOnCurveInfo.position.connect(jointDriverGrp.translate)
@@ -165,83 +202,145 @@ class ARAutoRig_Body(_ARAutoRig_Abstract):
             # index to assign upVector Object
             objUpVectorIndex = -1
             # up vector transforms, useful for later aimContraint
-            if not n ==len(spineJoints)-1:
-                ObjectUpVector = pm.group(empty=True, name='%s_%s_drv%s_upVector' % (baseName, jointNameSplit, n+1))
-                # ObjectUpVector = pm.spaceLocator(name='%s_upVector' % str(joint))
-                ObjectUpVector.setTranslation(jointDriverGrp.getTranslation() + pm.datatypes.Vector(0, 0, -20), 'world')
+            if not n == len(spineJoints) - 1:
+                ObjectUpVector = pm.group(empty=True,
+                                          name='%s_%s_drv%s_upVector' % (
+                                          baseName,
+                                          jointNameSplit,
+                                          n + 1))
+
+                ObjectUpVector.setTranslation(
+                    jointDriverGrp.getTranslation() + pm.datatypes.Vector(0,
+                                                                          0,
+                                                                          -20), 'world')
+
                 noXformSpineGrp.addChild(ObjectUpVector)
                 ObjectUpVectorList.append(ObjectUpVector)
                 # if not last iteration index -1
                 objUpVectorIndex = -2
+
             # AimConstraint locators, each locator aim to the upper locator
             if n == 0:
                 # parent first ObjectUpVector, to hips controller
                 self._spineIKControllerList[0].addChild(ObjectUpVector)
             else:
-                aimConstraint = pm.aimConstraint(self.jointDriverList[-1], self.jointDriverList[-2], aimVector=(1,0,0), upVector=(0,1,0), worldUpType='object', worldUpObject=ObjectUpVectorList[objUpVectorIndex])
-
+                aimConstraint = pm.aimConstraint(self.jointDriverList[-1],
+                                                 self.jointDriverList[-2],
+                                                 aimVector=(1, 0, 0),
+                                                 upVector=(0, 1, 0),
+                                                 worldUpType='object',
+                                                 worldUpObject=
+                                                 ObjectUpVectorList[
+                                                     objUpVectorIndex])
 
         # parent last target transform, to chest
         self._spineIKControllerList[-1].addChild(ObjectUpVectorList[-1])
 
         # objectUpVector conections, by pointContraint
-        totalDistance = ObjectUpVectorList[-1].getTranslation('world') - ObjectUpVectorList[0].getTranslation('world')
+        totalDistance = ObjectUpVectorList[-1].getTranslation('world') \
+                        - ObjectUpVectorList[0].getTranslation('world')
+
         logger.debug('totalDistance: %s' % totalDistance)
         totalDistance = totalDistance.length()
         logger.debug('totalDistance: %s' % totalDistance)
 
-        # can't do this before, because we need de first and the last upVectorObjects to config the pointConstraints
+        # can't do this before, because we need de first and
+        # the last upVectorObjects to config the pointConstraints
         # connect ipVectorObjects with point constraint
         for n, upVectorObject in enumerate(ObjectUpVectorList):
             if n == 0 or n == len(ObjectUpVectorList)-1:
                 continue
+
             jointNameSplit = str(spineJoints[n]).split('_')[1]
-            distance = upVectorObject.getTranslation('world') - ObjectUpVectorList[0].getTranslation('world')
+            distance = upVectorObject.getTranslation('world') \
+                       - ObjectUpVectorList[0].getTranslation('world')
+
             distance = distance.length()
             pointConstraintFactor = distance/totalDistance
 
-            pointContraint = pm.pointConstraint(ObjectUpVectorList[-1], ObjectUpVectorList[0], upVectorObject, maintainOffset=False,
-                                                name='%s_%s_drv_upVector_pointConstraint' % (baseName, jointNameSplit))
-            pointContraint.attr('%sW0' % str(ObjectUpVectorList[-1])).set(pointConstraintFactor)
-            pointContraint.attr('%sW1' % str(ObjectUpVectorList[0])).set(1-pointConstraintFactor)
+            pointContraint = pm.pointConstraint(ObjectUpVectorList[-1],
+                                                ObjectUpVectorList[0],
+                                                upVectorObject,
+                                                maintainOffset=False,
+                                                name='%s_%s_drv_upVector_pointConstraint'
+                                                     % (baseName,
+                                                        jointNameSplit))
+
+            pointContraint.attr('%sW0' % str(ObjectUpVectorList[-1])).set(
+                pointConstraintFactor)
+
+            pointContraint.attr('%sW1' % str(ObjectUpVectorList[0])).set(
+                1 - pointConstraintFactor)
 
         for n, joint in enumerate(spineJoints):
             # for each joint, create a multiply divide node
             # formula for scale: 1+(factorScale - 1)*influence
             # TODO: rename all this
-
-            jointNameSplit = str(joint).split('_')[1]  # review, maybe better store joints name in a list
+            # review, maybe better store joints name in a list
+            jointNameSplit = str(joint).split('_')[1]
 
             # TODO: do this more legible if it is possible
-            if re.match('.*(end|hips).*', str(joint)):
+            if re.match(".*(Tip|hips).*", str(joint)):
+                logger.debug("Spine ini and end joint: %s" % str(joint))
                 # last joint and first joint connect to controller
-                # if hips, use de min val, zero. when end, n will be bigger than ik controllers, so use  the last ik controller.
-                spineIkCtrConstr = self._spineIKControllerList[min(n, len(self._spineIKControllerList) - 1)]
-                spineIkCtrConstr.rename(str(joint).replace('joint', 'ctr').replace('skin','main'))  # rename ctr, useful for snap proxy model
+                # if hips, use de min val, zero. when end, n will be bigger
+                # than ik controllers, so use  the last ik controller.
+                spineIkCtrConstr = self._spineIKControllerList[
+                    min(n, len(self._spineIKControllerList) - 1)]
+                # rename ctr, useful for snap proxy model
+                spineIkCtrConstr.rename(
+                    str(joint).replace('joint', 'ctr').replace('skin',
+                                                               'main'))
                 # constraint
-                pm.pointConstraint(self.jointDriverList[n], joint, maintainOffset=False,  name='%s_%s_drv1_pointConstraint' % (baseName, jointNameSplit))
-                endJointOrientConstraint = pm.orientConstraint(self._spineIKControllerList[min(n, len(self._spineIKControllerList) - 1)], joint, maintainOffset=True, name='%s_%s_drv1_orientConstraint' % (baseName, jointNameSplit))
+                pm.pointConstraint(self.jointDriverList[n],
+                                   joint,
+                                   maintainOffset=False,
+                                   name='%s_%s_drv1_pointConstraint' % (
+                                       baseName,
+                                       jointNameSplit))
+
+                endJointOrientConstraint = pm.orientConstraint(
+                    self._spineIKControllerList[
+                        min(n, len(self._spineIKControllerList) - 1)],
+                    joint,
+                    maintainOffset=True,
+                    name='%s_%s_drv1_orientConstraint' % (
+                        baseName,
+                        jointNameSplit))
+
                 endJointOrientConstraint.interpType.set(0)
 
             else:
                 # connect to deform joints
-                self.jointDriverList[n].rename(str(joint).replace('skin', 'main'))  # rename driver, useful for snap proxy model
-                pm.parentConstraint(self.jointDriverList[n], joint, maintainOffset=True, name='%s_%s_drv1_parentConstraint' % (baseName, jointNameSplit))
+                # rename driver, useful for snap proxy model
+                self.jointDriverList[n].rename(str(joint).replace('skin', 'main'))
+                pm.parentConstraint(self.jointDriverList[n],
+                                    joint,
+                                    maintainOffset=True,
+                                    name='%s_%s_drv1_parentConstraint' % (
+                                    baseName,
+                                    jointNameSplit))
 
         # stretch
         ARH.stretchCurveVolume(spineCurve, spineJoints, baseName, self.mainCtr)
 
         # lock and hide attributes
-        ARC.lockAndHideAttr(self._spineIKControllerList[1:-1], False, True, True)  # ik Ctr, no hips and chest
-        ARC.lockAndHideAttr(spineFKControllerList[1:], True, False, True)  # fk controller list, no hips
-        ARC.lockAndHideAttr(spineFKControllerList[0], False, False, True)  # fk controller hips
-        ARC.lockAndHideAttr([self._spineIKControllerList[0], self._spineIKControllerList[-1]], False, False, True)  # ik Ctr, hips and chest
+        # ik Ctr, no hips and chest
+        ARC.lockAndHideAttr(self._spineIKControllerList[1:-1], False, True, True)
+        # fk controller list, no hips
+        ARC.lockAndHideAttr(spineFKControllerList[1:], True, False, True)
+        # fk controller hips
+        ARC.lockAndHideAttr(spineFKControllerList[0], False, False, True)
+        # ik Ctr, hips and chest
+        ARC.lockAndHideAttr([self._spineIKControllerList[0],
+                             self._spineIKControllerList[-1]],
+                            False,
+                            False,
+                            True)
 
         # function for create extra content
         for func in funcs:
             ikControllers, fkControllers = func()
-            #self.spineIKControllerList = self.spineIKControllerList + ikControllers
-            #spineFKControllerList = spineFKControllerList + fkControllers
 
         # save data
         self.joints[zone] = spineJoints

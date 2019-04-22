@@ -41,7 +41,6 @@ class _ARAutoRig_Abstract(object):
             pm.PyNode('rig_grp').addChild(self._ctrGrp)
 
 
-
     # method decorator, check if already exist the rig part,
     # and create the necessary attr circuity (nodes with controllers connections)
     class checker_auto(object):

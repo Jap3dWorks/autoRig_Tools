@@ -195,7 +195,6 @@ class ARAutoRig_Face(_ARAutoRig_Abstract):
                         animNode.setPreInfinityType('linear')
 
 
-
     def addCluster(self, clsTrns, parent=None, ctrSize=1.0, ctrlNull=None, symCtr=False, mirrorCls=False):
         """
         create a cluster for facial rigs
